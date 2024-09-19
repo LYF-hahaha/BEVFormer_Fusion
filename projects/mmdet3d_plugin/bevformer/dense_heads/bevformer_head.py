@@ -141,7 +141,7 @@ class BEVFormerHead(DETRHead):
         bev_pos = self.positional_encoding(bev_mask).to(dtype)
 
         if only_bev:  # only use encoder to obtain BEV features, TODO: refine the workaround
-            return self.transformer.get_bev_features(
+            return self.transformer.get_bev_features(   # 只走 transformer.py 的encoder部分
                 mlvl_feats,
                 bev_queries,
                 self.bev_h,
@@ -168,7 +168,8 @@ class BEVFormerHead(DETRHead):
                 img_metas=img_metas,
                 prev_bev=prev_bev
         )
-        
+            
+        # 这里的img_bev_feature是插值成128×128的 bev_embed是fusion了img&pts的 
         img_bev_feature, bev_embed, hs, init_reference, inter_references = outputs
         hs = hs.permute(0, 2, 1, 3)
         outputs_classes = []
@@ -213,6 +214,7 @@ class BEVFormerHead(DETRHead):
         }
 
         return outs
+        
 
     def _get_target_single(self,
                            cls_score,
@@ -385,10 +387,10 @@ class BEVFormerHead(DETRHead):
         isnotnan = torch.isfinite(normalized_bbox_targets).all(dim=-1)
         bbox_weights = bbox_weights * self.code_weights
 
-        loss_bbox = self.loss_bbox(
-            bbox_preds[isnotnan, :10], normalized_bbox_targets[isnotnan,
-                                                               :10], bbox_weights[isnotnan, :10],
-            avg_factor=num_total_pos)
+        loss_bbox = self.loss_bbox(bbox_preds[isnotnan, :10], 
+                                   normalized_bbox_targets[isnotnan,:10], 
+                                   bbox_weights[isnotnan, :10],
+                                   avg_factor=num_total_pos)
         if digit_version(TORCH_VERSION) >= digit_version('1.8'):
             loss_cls = torch.nan_to_num(loss_cls)
             loss_bbox = torch.nan_to_num(loss_bbox)

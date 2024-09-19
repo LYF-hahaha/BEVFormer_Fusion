@@ -151,12 +151,13 @@ class PerceptionTransformer(BaseModule):
                 for i in range(bs):
                     # num_prev_bev = prev_bev.size(1)
                     rotation_angle = kwargs['img_metas'][i]['can_bus'][-1]
-                    tmp_prev_bev = prev_bev[:, i].reshape(
-                        bev_h, bev_w, -1).permute(2, 0, 1)
-                    tmp_prev_bev = rotate(tmp_prev_bev, rotation_angle,
+                    tmp_prev_bev = prev_bev[:, i].reshape(bev_h, bev_w, -1).permute(2, 0, 1)
+                    # tmp_prev_bev = prev_bev[:, i].reshape(128, 128, -1).permute(2, 0, 1)
+                    tmp_prev_bev = rotate(tmp_prev_bev,
+                                          rotation_angle,
                                           center=self.rotate_center)
-                    tmp_prev_bev = tmp_prev_bev.permute(1, 2, 0).reshape(
-                        bev_h * bev_w, 1, -1)
+                    tmp_prev_bev = tmp_prev_bev.permute(1, 2, 0).reshape(bev_h * bev_w, 1, -1)
+                    # tmp_prev_bev = tmp_prev_bev.permute(1, 2, 0).reshape(128 * 128, 1, -1)
                     prev_bev[:, i] = tmp_prev_bev[:, 0]
 
         # add can bus signals
@@ -254,8 +255,8 @@ class PerceptionTransformer(BaseModule):
                     otherwise None.
         """
 
-        img_bev_feature = self.get_bev_features(
-            mlvl_feats,
+        img_bev_feature = self.get_bev_features(  # 这里是 encoder & decoder 一起
+            mlvl_feats,                           # 还是会调用到上面无obj_que_emb的forward()  
             bev_queries,
             bev_h,
             bev_w,
@@ -264,6 +265,8 @@ class PerceptionTransformer(BaseModule):
             prev_bev=prev_bev,
             **kwargs)  
 
+        img_bev_feat_orig = img_bev_feature.clone().detach()
+        
         bs = mlvl_feats[0].size(0)
         
         # img_bev_feature shape: (bs, bev_h*bev_w, embed_dims)即(1, 50x50, 256)
@@ -271,20 +274,27 @@ class PerceptionTransformer(BaseModule):
 
         features = []
         # 点云BEV空间特征的尺寸为BEV_H_align, BEV_W_align（128x128）
-        BEV_H_align, BEV_W_align = pts_feats.shape[-2:]
+        # BEV_H_align, BEV_W_align = pts_feats.shape[-2:]
+        BEV_H_align, BEV_W_align = pts_feats[0].shape[-2:]
 
         # TODO: complete the following code with correct expressions.
         # 1. img_bev_feature由(bs, bev_h*bev_w, embed_dims)变换维度到 img_bev_feature_align：(bs, self.embed_dims, bev_h, bev_w)
-
-        # 2. 将图像BEV特征通过interpolate插值函数插值到128x128大小，与点云BEV对齐，mode选择bilinear双线性插值法，设置对齐corners
-
+        img_bev_feature = img_bev_feature.reshape(bs, bev_h, bev_w, self.embed_dims).permute(0,3,1,2)
+        
+        # 2. 将图像BEV特征通过interpolate插值函数插值到128x128大小，与点云BEV对齐，mode选择bilinear双线性插值法，设置对齐corners  scale_factor=(2.56,2.56)
+        img_bev_feature = F.interpolate(img_bev_feature, (BEV_H_align, BEV_W_align), mode='bilinear', align_corners=True)
+        
         # 3. 在features列表中添加上图像BEV特征和点云BEV特征
-
+        features.append(img_bev_feature)
+        features.append(pts_feats)
+        
         # 4. 将features列表输入给融合层self.pts_fusion_layer做融合加强, [1, 384+256, 128, 128]-->[1, 256, 128, 128]
+        bev_embed = self.pts_fusion_layer(features)
         
         # 5. 融合后的BEV特征bev_embed还原到初始形状, 
         # [bs, self.embed_dims, BEV_H_align, BEV_W_align]-->[bs, BEV_H_align*BEV_W_align, self.embed_dims]
-
+        bev_embed = bev_embed.reshape(bs,self.embed_dims, BEV_H_align*BEV_W_align).permute(0,2,1)
+        
         query_pos, query = torch.split(
             object_query_embed, self.embed_dims, dim=1)
         query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1)
@@ -311,4 +321,4 @@ class PerceptionTransformer(BaseModule):
 
         inter_references_out = inter_references
 
-        return img_bev_feature, bev_embed, inter_states, init_reference_out, inter_references_out
+        return img_bev_feat_orig, bev_embed, inter_states, init_reference_out, inter_references_out

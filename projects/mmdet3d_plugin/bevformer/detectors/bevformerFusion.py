@@ -111,8 +111,35 @@ class BEVFormerFusion(MVXTwoStageDetector):
 
         # TODO 1: complete the following code with correct expressions.
         # 参考mmdet3d/models/detectors/centerpoint.py中的extract_pts_feat点云特征提取部分补全以下代码
-        
-        raise NotImplementedError
+
+        voxel_features = self.pts_voxel_encoder(voxels,
+                                                num_points,
+                                                coors)
+        batch_size = coors[-1, 0] + 1
+        x = self.pts_middle_encoder(voxel_features, 
+                                    coors,
+                                    batch_size)
+        x = self.pts_backbone(x)
+        if self.with_pts_neck:
+            x = self.pts_neck(x)
+        return x
+    
+        # 该部分内容参考自mmdet3d/models/detectors/mvx_two_stage.py
+        # voxel_features = self.pts_voxel_encoder(voxel_dict['voxels'],
+        #                                         voxel_dict['num_points'],
+        #                                         voxel_dict['coors'], 
+        #                                         img_feats,
+        #                                         batch_input_metas)
+        # batch_size = voxel_dict['coors'][-1, 0] + 1
+        # x = self.pts_middle_encoder(voxel_features, 
+        #                             voxel_dict['coors'],
+        #                             batch_size)
+        # x = self.pts_backbone(x)
+        # if self.with_pts_neck:
+        #     x = self.pts_neck(x)
+        # return x
+    
+        # raise NotImplementedError
 
     @torch.no_grad()
     @force_fp32()
@@ -128,7 +155,14 @@ class BEVFormerFusion(MVXTwoStageDetector):
         """
         voxels, coors, num_points = [], [], []
         for res in points:
-            res_voxels, res_coors, res_num_points = self.pts_voxel_layer(res)
+            # Returns:
+            #   voxels: [M, max_points, ndim] float tensor. only contain points and returned when max_points != -1.
+            #          M:体素个数、max_points:一个体素内点的最大值、ndim:一个点的维度
+            #   coordinates: [M, 3] int32 tensor, always returned.
+            #          体素化的坐标研究范围，可视化后是平面的
+            #   num_points_per_voxel: [M] int32 tensor. Only returned when max_points != -1.
+            #          体素中点的个数（维度是[29882]，每个元素是1~20之间的数，表示某个体素中点的数量）              
+            res_voxels, res_coors, res_num_points = self.pts_voxel_layer(res)       
             voxels.append(res_voxels)
             coors.append(res_coors)
             num_points.append(res_num_points)
@@ -209,9 +243,9 @@ class BEVFormerFusion(MVXTwoStageDetector):
 
         with torch.no_grad():
             prev_bev = None
-            bs, len_queue, num_cams, C, H, W = imgs_queue.shape
+            bs, len_queue, num_cams, C, H, W = imgs_queue.shape     # 不止拿一张照片,多张提升数据可靠性,在tiny里是2
             imgs_queue = imgs_queue.reshape(bs*len_queue, num_cams, C, H, W)
-            img_feats_list = self.extract_feat(img=imgs_queue, points=points, len_queue=len_queue)[0]
+            img_feats_list = self.extract_feat(img=imgs_queue, points=points, len_queue=len_queue)[0]  # 这后面一个[0]把pts_feat给去了
             for i in range(len_queue):
                 img_metas = [each[i] for each in img_metas_list]
                 if not img_metas[0]['prev_bev_exists']:
@@ -219,7 +253,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
                 # img_feats = self.extract_feat(img=img, img_metas=img_metas)
                 img_feats = [each_scale[:, i] for each_scale in img_feats_list]
                 prev_bev = self.pts_bbox_head(
-                    img_feats, points, img_metas, prev_bev, only_bev=True)
+                    img_feats, points, img_metas, prev_bev, only_bev=True)  # 第一帧prev_bev=None, 第一帧encoder(没用decoder)输出的bev_embed就是第二针的prev_bev
             self.train()
             return prev_bev
 
@@ -273,6 +307,8 @@ class BEVFormerFusion(MVXTwoStageDetector):
             prev_bev = None
         # img_feats = self.extract_feat(img=img, img_metas=img_metas)
         img_feats, pts_feats = self.extract_feat(img=img, points=points, img_metas=img_metas)
+        # img_feats = torch.Size([1, 6, 256, 15, 25])
+        # pts_feats = torch.Size([1, 384, 128, 128])
         losses = dict()
         losses_pts = self.forward_pts_train(img_feats, pts_feats, gt_bboxes_3d,
                                             gt_labels_3d, img_metas,
@@ -308,6 +344,8 @@ class BEVFormerFusion(MVXTwoStageDetector):
             img_metas[0][0]['can_bus'][-1] = 0
             img_metas[0][0]['can_bus'][:3] = 0
 
+        # 注意，这里把上一帧的img_bev_feats赋值给new_prev_bev了
+        # 而返回的原先new_prev_bev (即带pts的fusion_embed丢弃了)
         new_prev_bev, _, bbox_results = self.simple_test(
             img_metas[0], img[0], points[0], prev_bev=self.prev_frame_info['prev_bev'], **kwargs)
         # During inference, we save the BEV features and ego motion of each timestamp.
@@ -316,6 +354,23 @@ class BEVFormerFusion(MVXTwoStageDetector):
 
         self.prev_frame_info['prev_bev'] = new_prev_bev
         return bbox_results
+
+
+    def simple_test(self, img_metas, img=None, points=None, prev_bev=None, rescale=False):
+        """Test function without augmentaiton."""
+
+        # TODO 2: replace the 'None' values in the following code with correct expressions.
+        # 调用self.extract_feat函数，输入图像img，点云points和图像信息img_metas，输出图像特征和点云特征
+        img_feats, pts_feats = self.extract_feat(img, points, img_metas)
+
+        bbox_list = [dict() for i in range(len(img_metas))]
+        img_bev_feature, new_prev_bev, bbox_pts = self.simple_test_pts(
+            img_feats, pts_feats, img_metas, prev_bev, rescale=rescale)
+        for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
+            result_dict['pts_bbox'] = pts_bbox
+        
+        return img_bev_feature, new_prev_bev, bbox_list
+
 
     def simple_test_pts(self, img_feats, pts_feats, img_metas, prev_bev=None, rescale=False):
         """Test function"""
@@ -330,20 +385,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
         ]
         return outs['img_bev_feature'], outs['bev_embed'], bbox_results
 
-    def simple_test(self, img_metas, img=None, points=None, prev_bev=None, rescale=False):
-        """Test function without augmentaiton."""
-
-        # TODO 2: replace the 'None' values in the following code with correct expressions.
-        # 调用self.extract_feat函数，输入图像img，点云points和图像信息img_metas，输出图像特征和点云特征
-        img_feats, pts_feats = None
-
-        bbox_list = [dict() for i in range(len(img_metas))]
-        img_bev_feature, new_prev_bev, bbox_pts = self.simple_test_pts(
-            img_feats, pts_feats, img_metas, prev_bev, rescale=rescale)
-        for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
-            result_dict['pts_bbox'] = pts_bbox
-        
-
+    
         # # 可视化BEV融合特征
         # new_prev_bev_np = new_prev_bev.permute(1,0,2)
         # new_prev_bev_np = new_prev_bev_np.view(1,128,128,256)
@@ -359,7 +401,6 @@ class BEVFormerFusion(MVXTwoStageDetector):
         # name = img_metas[0]['pts_filename'].split('__')[-1]
         # plt.savefig(f'vis_bev_feat/fusion_bev/{name}.png')
         
-
         # # 可视化图像BEV特征
         # img_bev_feature_np = img_bev_feature.view(1, 50, 50, 256)
         # img_bev_feature_np = img_bev_feature_np.cpu().numpy()
@@ -374,7 +415,6 @@ class BEVFormerFusion(MVXTwoStageDetector):
         # name = img_metas[0]['pts_filename'].split('__')[-1]
         # plt.savefig(f'vis_bev_feat/img_bev/{name}.png')
 
-
         # # 可视化点云BEV特征
         # pts_feats_np = pts_feats.cpu().numpy()
         # bev_feat_abs = np.abs(pts_feats_np)
@@ -388,5 +428,4 @@ class BEVFormerFusion(MVXTwoStageDetector):
         # name = img_metas[0]['pts_filename'].split('__')[-1]
         # plt.savefig(f'vis_bev_feat/pts_bev/{name}.png')
 
-
-        return img_bev_feature, new_prev_bev, bbox_list
+        # return img_bev_feature, new_prev_bev, bbox_list

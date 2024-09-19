@@ -11,8 +11,7 @@ class ConvFuser(nn.Sequential):
         self.in_channels = in_channels
         self.out_channels = out_channels
         super().__init__(
-            nn.Conv2d(
-                sum(in_channels), out_channels, 3, padding=1, bias=False),
+            nn.Conv2d(sum(in_channels), out_channels, 3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(True),
             SE_Block(self.out_channels)
@@ -20,10 +19,11 @@ class ConvFuser(nn.Sequential):
 #TODO 1: replace the 'None' values in the following code with correct expressions.
 # input is a list containing two Tensors with different channels, you should 
 # concatenate them in channel dimension and then give to the super().forward() as input.
-    def forward(self, inputs: List[torch.Tensor]) -> torch.Tensor:
-        return super().forward(
-            None
-            )
+    def forward(self, inputs: List[torch.Tensor]) -> torch.Tensor:    # 类型提示，告知期待的输入和输出类型
+        feat_1, feat_2 = inputs
+        feat_2 = feat_2[0]
+        feat_comb = torch.cat([feat_1, feat_2], dim=1)   # dim瞎写的,好像蒙对了... 
+        return super().forward(feat_comb)                # dim=1好像就是channel维度
 
 #TODO 2: replace the 'None' values in the following code with correct expressions.
 # self.att module consists of AdaptiveAvgPool2d, 1x1convolution and sigmoid function
@@ -31,13 +31,16 @@ class SE_Block(nn.Module):
     def __init__(self, c):
         super().__init__()
         self.att = nn.Sequential(
-            None,
-            None,
-            None
+            nn.AdaptiveAvgPool2d((1,1)),  
+            nn.Conv2d(256, 256, 
+                      kernel_size=(1,1)),
+            nn.Sigmoid()
         )
         
 #TODO 3: complete the forward process.
 # weights should be distributed for each channel to get final output.
-    def forward(self, x):
-        
-        raise NotImplementedError
+    def forward(self, x):   # x.shape=[1,256,128,128]
+        out = self.att(x)
+        out = out*x
+        return out
+        # raise NotImplementedError

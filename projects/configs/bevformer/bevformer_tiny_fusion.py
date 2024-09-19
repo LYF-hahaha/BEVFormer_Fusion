@@ -9,7 +9,8 @@
 
 _base_ = [
     '../datasets/custom_nus-3d.py',
-    '../_base_/default_runtime.py'
+    '../_base_/default_runtime.py',
+    # '../_base_/models/centerpoint_02pillar_second_secfpn_nus.py'
 ]
 #
 plugin = True
@@ -166,13 +167,37 @@ model = dict(
     # and complete the config of pts_voxel_encoder, pts_middle_encoder, 
     # pts_backbone and pts_neck.
     pts_voxel_layer=dict(
-        max_num_points=20, 
+        max_num_points=20,  # 每个体素中最多20个点 
         point_cloud_range=point_cloud_range,
-        voxel_size=voxel_size, max_voxels=(30000, 40000)),
-    pts_voxel_encoder=dict(None),
-    pts_middle_encoder=dict(None),
-    pts_backbone=dict(None),
-    pts_neck=dict(None),
+        voxel_size=voxel_size, 
+        max_voxels=(30000, 40000)),
+    pts_voxel_encoder=dict(
+        type='PillarFeatureNet',
+        in_channels=5,
+        feat_channels=[64],
+        with_distance=False,
+        voxel_size=(0.2, 0.2, 8),
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+        legacy=False),
+    pts_middle_encoder=dict(type='PointPillarsScatter', 
+                            in_channels=64, 
+                            output_shape=(512, 512)),
+    pts_backbone=dict(
+        type='SECOND',
+        in_channels=64,
+        out_channels=[64, 128, 256],
+        layer_nums=[3, 5, 5],
+        layer_strides=[2, 2, 2],
+        norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+        conv_cfg=dict(type='Conv2d', bias=False)),
+    pts_neck=dict(
+        type='SECONDFPN',
+        in_channels=[64, 128, 256],
+        out_channels=[128, 128, 128],
+        upsample_strides=[0.5, 1, 2],
+        norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+        upsample_cfg=dict(type='deconv', bias=False),
+        use_conv_for_no_stride=True),
 
 
     # model training and testing settings
@@ -180,7 +205,7 @@ model = dict(
         grid_size=[512, 512, 1],
         voxel_size=voxel_size,
         point_cloud_range=point_cloud_range,
-        out_size_factor=4,
+        out_size_factor=4,  # centerpoint中检测头的下采样倍数，最后BEV预测的大小为grid_size//out_size_factor
         assigner=dict(
             type='HungarianAssigner3D',
             cls_cost=dict(type='FocalLossCost', weight=2.0),
@@ -189,7 +214,7 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'CustomNuScenesDataset'
-data_root = './data/nuscenes/'
+data_root = './data/nus_extend'
 file_client_args = dict(backend='disk')
 
 
@@ -230,8 +255,19 @@ test_pipeline = [
     #TODO 3: replace the 'None' values in the following code with correct expressions.
     # Please add LoadPointsFromFile and LoadPointsFromMultiSweeps preprocess for lidar 
     # points in the test pipeline.
-    dict(None),
-    dict(None),
+    dict(
+        type='LoadPointsFromFile',
+        coord_type='LIDAR',
+        load_dim=5,
+        use_dim=5,
+        file_client_args=file_client_args),
+    dict(
+        type='LoadPointsFromMultiSweeps',
+        sweeps_num=9,
+        use_dim=[0, 1, 2, 3, 4],
+        pad_empty_sweeps=True,
+        remove_close=True,
+        file_client_args=file_client_args),
 
 
     dict(
@@ -275,7 +311,7 @@ data = dict(
              classes=class_names, modality=input_modality, samples_per_gpu=1),
     test=dict(type=dataset_type,
               data_root=data_root,
-              ann_file=data_root + 'nuscenes_infos_temporal_val.pkl',
+              ann_file=data_root + 'nuscenes_infos_temporal_test.pkl',
               pipeline=test_pipeline, bev_size=(bev_h_, bev_w_),
               classes=class_names, modality=input_modality),
     shuffler_sampler=dict(type='DistributedGroupSampler'),
@@ -299,8 +335,8 @@ lr_config = dict(
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
     min_lr_ratio=1e-3)
-total_epochs = 24
-evaluation = dict(interval=1, pipeline=test_pipeline)
+total_epochs = 25
+evaluation = dict(interval=5, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 
