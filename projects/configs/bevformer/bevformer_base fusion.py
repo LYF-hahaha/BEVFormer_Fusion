@@ -1,12 +1,3 @@
-# BEvFormer-tiny consumes at lease 6700M GPU memory
-# compared to bevformer_base, bevformer_tiny has
-# smaller backbone: R101-DCN -> R50
-# smaller BEV: 200*200 -> 50*50
-# less encoder layers: 6 -> 3
-# smaller input size: 1600*900 -> 800*450
-# multi-scale feautres -> single scale features (C5)
-
-
 _base_ = [
     '../datasets/custom_nus-3d.py',
     '../_base_/default_runtime.py'
@@ -21,9 +12,9 @@ point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 voxel_size = [0.2, 0.2, 8]
 
 
-img_norm_cfg = dict(
-    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 
+img_norm_cfg = dict(
+    mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
 # For nuScenes we usually do 10-class detection
 class_names = [
     'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
@@ -31,7 +22,7 @@ class_names = [
 ]
 
 input_modality = dict(
-    use_lidar=False,
+    use_lidar=True,
     use_camera=True,
     use_radar=False,
     use_map=False,
@@ -40,32 +31,33 @@ input_modality = dict(
 _dim_ = 256
 _pos_dim_ = _dim_//2
 _ffn_dim_ = _dim_*2
-_num_levels_ = 1
-bev_h_ = 50
-bev_w_ = 50
-queue_length = 3 # each sequence contains `queue_length` frames.
+_num_levels_ = 4
+bev_h_ = 200
+bev_w_ = 200
+queue_length = 4 # each sequence contains `queue_length` frames.
 
 model = dict(
     type='BEVFormer',
     use_grid_mask=True,
     video_test_mode=True,
-    pretrained=dict(img='torchvision://resnet50'),
     img_backbone=dict(
         type='ResNet',
-        depth=50,
+        depth=101,
         num_stages=4,
-        out_indices=(3,),
+        out_indices=(1, 2, 3),
         frozen_stages=1,
-        norm_cfg=dict(type='BN', requires_grad=False),
+        norm_cfg=dict(type='BN2d', requires_grad=False),
         norm_eval=True,
-        style='pytorch'),
+        style='caffe',
+        dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
+        stage_with_dcn=(False, False, True, True)),
     img_neck=dict(
         type='FPN',
-        in_channels=[2048],
+        in_channels=[512, 1024, 2048],
         out_channels=_dim_,
         start_level=0,
         add_extra_convs='on_output',
-        num_outs=_num_levels_,
+        num_outs=4,
         relu_before_extra_convs=True),
     pts_bbox_head=dict(
         type='BEVFormerHead',
@@ -85,7 +77,7 @@ model = dict(
             embed_dims=_dim_,
             encoder=dict(
                 type='BEVFormerEncoder',
-                num_layers=3,
+                num_layers=6,
                 pc_range=point_cloud_range,
                 num_points_in_pillar=4,
                 return_intermediate=False,
@@ -111,6 +103,13 @@ model = dict(
                     ffn_dropout=0.1,
                     operation_order=('self_attn', 'norm', 'cross_attn', 'norm',
                                      'ffn', 'norm'))),
+            
+            #TODO 1: replace the 'None' values in the following code with correct expressions, you should
+            # input two channles, 384 for lidar BEV channel and 256 for image BEV 
+            # channel, output fusion channel 256
+            pts_fusion_layer=dict(
+                type='ConvFuser', in_channels=[256, 384], out_channels=256),        
+            
             decoder=dict(
                 type='DetectionTransformerDecoder',
                 num_layers=6,
@@ -154,6 +153,45 @@ model = dict(
             loss_weight=2.0),
         loss_bbox=dict(type='L1Loss', loss_weight=0.25),
         loss_iou=dict(type='GIoULoss', loss_weight=0.0)),
+    
+    #TODO 2: replace the 'None' values in the following code with correct expressions.
+    # Please refer to configs/_base_/models/centerpoint_02pillar_second_secfpn_nus.py 
+    # and complete the config of pts_voxel_encoder, pts_middle_encoder, 
+    # pts_backbone and pts_neck.
+    pts_voxel_layer=dict(
+        max_num_points=20,  # 每个体素中最多20个点 
+        point_cloud_range=point_cloud_range,
+        voxel_size=voxel_size, 
+        max_voxels=(30000, 40000)),
+    pts_voxel_encoder=dict(
+        type='PillarFeatureNet',
+        in_channels=5,
+        feat_channels=[64],
+        with_distance=False,
+        voxel_size=(0.2, 0.2, 8),
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+        legacy=False),
+    pts_middle_encoder=dict(type='PointPillarsScatter', 
+                            in_channels=64, 
+                            output_shape=(512, 512)),
+    pts_backbone=dict(
+        type='SECOND',
+        in_channels=64,
+        out_channels=[64, 128, 256],
+        layer_nums=[3, 5, 5],
+        layer_strides=[2, 2, 2],
+        norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+        conv_cfg=dict(type='Conv2d', bias=False)),
+    pts_neck=dict(
+        type='SECONDFPN',
+        in_channels=[64, 128, 256],
+        out_channels=[128, 128, 128],
+        upsample_strides=[0.5, 1, 2],
+        norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+        upsample_cfg=dict(type='deconv', bias=False),
+        use_conv_for_no_stride=True),    
+    
+    
     # model training and testing settings
     train_cfg=dict(pts=dict(
         grid_size=[512, 512, 1],
@@ -168,18 +206,33 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'CustomNuScenesDataset'
-data_root = 'data/nuscenes'
+data_root = 'data/nuscenes/'
+# data_root = './data/nus_extend/'
 file_client_args = dict(backend='disk')
 
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='PhotoMetricDistortionMultiViewImage'),
+    
+    dict(
+        type='LoadPointsFromFile',
+        coord_type='LIDAR',
+        load_dim=5,
+        use_dim=5,
+        file_client_args=file_client_args),
+    dict(
+        type='LoadPointsFromMultiSweeps',
+        sweeps_num=9,
+        use_dim=[0, 1, 2, 3, 4],
+        pad_empty_sweeps=True,
+        remove_close=True,
+        file_client_args=file_client_args),   
+    
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectNameFilter', classes=class_names),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
-    dict(type='RandomScaleImageMultiViewImage', scales=[0.5]),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(type='CustomCollect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img'])
@@ -188,7 +241,26 @@ train_pipeline = [
 test_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
-   
+    
+    # dict(type='PadMultiViewImage', size_divisor=32),
+    
+    #TODO 3: replace the 'None' values in the following code with correct expressions.
+    # Please add LoadPointsFromFile and LoadPointsFromMultiSweeps preprocess for lidar 
+    # points in the test pipeline.
+    dict(
+        type='LoadPointsFromFile',
+        coord_type='LIDAR',
+        load_dim=5,
+        use_dim=5,
+        file_client_args=file_client_args),
+    dict(
+        type='LoadPointsFromMultiSweeps',
+        sweeps_num=9,
+        use_dim=[0, 1, 2, 3, 4],
+        pad_empty_sweeps=True,
+        remove_close=True,
+        file_client_args=file_client_args),    
+    
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1600, 900),
@@ -201,7 +273,7 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='CustomCollect3D', keys=['img'])
+            dict(type='CustomCollect3D', keys=['img','points'])
         ])
 ]
 
@@ -211,7 +283,7 @@ data = dict(
     train=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root + '/nuscenes_infos_temporal_train.pkl',
+        ann_file=data_root + 'nuscenes_infos_temporal_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         modality=input_modality,
@@ -224,12 +296,12 @@ data = dict(
         box_type_3d='LiDAR'),
     val=dict(type=dataset_type,
              data_root=data_root,
-             ann_file=data_root + '/nuscenes_infos_temporal_val.pkl',
+             ann_file=data_root + 'nuscenes_infos_temporal_val.pkl',
              pipeline=test_pipeline,  bev_size=(bev_h_, bev_w_),
              classes=class_names, modality=input_modality, samples_per_gpu=1),
     test=dict(type=dataset_type,
               data_root=data_root,
-              ann_file=data_root + '/nuscenes_infos_temporal_val.pkl',
+              ann_file=data_root + 'nuscenes_infos_temporal_val.pkl',
               pipeline=test_pipeline, bev_size=(bev_h_, bev_w_),
               classes=class_names, modality=input_modality),
     shuffler_sampler=dict(type='DistributedGroupSampler'),
@@ -253,11 +325,11 @@ lr_config = dict(
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
     min_lr_ratio=1e-3)
-total_epochs = 24
-evaluation = dict(interval=1, pipeline=test_pipeline)
+total_epochs = 6
+evaluation = dict(interval=2, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
-
+load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
 log_config = dict(
     interval=50,
     hooks=[
@@ -265,4 +337,4 @@ log_config = dict(
         dict(type='TensorboardLoggerHook')
     ])
 
-checkpoint_config = dict(interval=2)
+checkpoint_config = dict(interval=1)

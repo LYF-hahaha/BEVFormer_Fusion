@@ -195,8 +195,8 @@ def main():
         set_random_seed(args.seed, deterministic=args.deterministic)
 
     # build the dataloader
-    dataset = build_dataset(cfg.data.test)
-    data_loader = build_dataloader(
+    dataset = build_dataset(cfg.data.test)  # 这里是config文件中data字典里的内容
+    data_loader = build_dataloader(         # data:选test.pkl  pipline=test_pipline 
         dataset,
         samples_per_gpu=samples_per_gpu,
         workers_per_gpu=cfg.data.workers_per_gpu,
@@ -230,7 +230,14 @@ def main():
     if not distributed:
         # assert False
         model = MMDataParallel(model, device_ids=[0])
+        # 载入数据和模型后开始单GPU测试，并输出结果 (所以换full测试集后会时间多很多)
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
+            # len(outputs)  6019
+            # outputs[0]['pts_bbox'].keys()  dict_keys(['boxes_3d', 'scores_3d', 'labels_3d'])
+            # outputs[0]['pts_bbox']['boxes_3d'].tensor.shape  torch.Size([300, 9]) 
+            # outputs[0]['pts_bbox']['scores_3d'].shape        torch.Size([300])
+            # outputs[0]['pts_bbox']['labels_3d'].shape        torch.Size([300])
+
     else:
         model = MMDistributedDataParallel(
             model.cuda(),
@@ -240,26 +247,32 @@ def main():
                                         args.gpu_collect)
 
     rank, _ = get_dist_info()
+        # 获取有关分布式进程环境的信息。
+        #  返回:
+        #  一个元组 (int, int):
+        #     * rank: 当前进程在分布式环境中的排名
+        #     * world_size: 分布式环境中的进程总数
+        # 看当前进程是否是排第一的（给更高优先级的进程让位？）
     if rank == 0:
         if args.out:
             print(f'\nwriting results to {args.out}')
             assert False
             #mmcv.dump(outputs['bbox_results'], args.out)
-        kwargs = {} if args.eval_options is None else args.eval_options
+        kwargs = {} if args.eval_options is None else args.eval_options  # eval_options=None
         kwargs['jsonfile_prefix'] = osp.join('test', args.config.split(
             '/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_'))
         if args.format_only:
             dataset.format_results(outputs, **kwargs)
 
-        if args.eval:
+        if args.eval:  # bbox
             eval_kwargs = cfg.get('evaluation', {}).copy()
             # hard-code way to remove EvalHook args
             for key in [
                     'interval', 'tmpdir', 'start', 'gpu_collect', 'save_best',
                     'rule'
             ]:
-                eval_kwargs.pop(key, None)
-            eval_kwargs.update(dict(metric=args.eval, **kwargs))
+                eval_kwargs.pop(key, None)  # 按照key在kwargs里边,找到对应的值. 如果有就返回key,并且从kwargs中删除掉;如果没有这个key,就返回None
+            eval_kwargs.update(dict(metric=args.eval, **kwargs))  # 新增了'metric','jsonfile_prefix' 这两个key
 
             print(dataset.evaluate(outputs, **eval_kwargs))
 

@@ -9,8 +9,7 @@
 
 _base_ = [
     '../datasets/custom_nus-3d.py',
-    '../_base_/default_runtime.py',
-    # '../_base_/models/centerpoint_02pillar_second_secfpn_nus.py'
+    '../_base_/default_runtime.py'
 ]
 #
 plugin = True
@@ -213,8 +212,7 @@ model = dict(
             iou_cost=dict(type='IoUCost', weight=0.0), # Fake cost. This is just to make it compatible with DETR head.
             pc_range=point_cloud_range))))
 
-dataset_type = 'CustomNuScenesDataset'
-data_root = './data/nus_extend'
+
 file_client_args = dict(backend='disk')
 
 
@@ -243,7 +241,6 @@ train_pipeline = [
     dict(type='RandomScaleImageMultiViewImage', scales=[0.5]),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
-    
     dict(type='CustomCollect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'points'])
 ]
 
@@ -269,7 +266,6 @@ test_pipeline = [
         remove_close=True,
         file_client_args=file_client_args),
 
-
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1600, 900),
@@ -286,6 +282,9 @@ test_pipeline = [
         ]),
 ]
 
+dataset_type = 'CustomNuScenesDataset'
+data_root = './data/nus_extend/'
+# data_root = './data/nuscenes'
 
 data = dict(
     samples_per_gpu=1,
@@ -293,7 +292,7 @@ data = dict(
     train=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root + 'nuscenes_infos_temporal_train.pkl',
+        ann_file=data_root + '/nuscenes_infos_temporal_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
         modality=input_modality,
@@ -306,12 +305,13 @@ data = dict(
         box_type_3d='LiDAR'),
     val=dict(type=dataset_type,
              data_root=data_root,
-             ann_file=data_root + 'nuscenes_infos_temporal_val.pkl',
+             ann_file=data_root + '/nuscenes_infos_temporal_val.pkl',
              pipeline=test_pipeline,  bev_size=(bev_h_, bev_w_),
              classes=class_names, modality=input_modality, samples_per_gpu=1),
     test=dict(type=dataset_type,
               data_root=data_root,
-              ann_file=data_root + 'nuscenes_infos_temporal_test.pkl',
+            #   ann_file=data_root + '/nuscenes_infos_temporal_test.pkl',
+              ann_file=data_root + '/nuscenes_infos_temporal_val.pkl',      # 这里用val相当于跑的是训练过程中的验证
               pipeline=test_pipeline, bev_size=(bev_h_, bev_w_),
               classes=class_names, modality=input_modality),
     shuffler_sampler=dict(type='DistributedGroupSampler'),
@@ -335,8 +335,8 @@ lr_config = dict(
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
     min_lr_ratio=1e-3)
-total_epochs = 25
-evaluation = dict(interval=5, pipeline=test_pipeline)
+total_epochs = 6
+evaluation = dict(interval=2, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 
@@ -347,4 +347,5 @@ log_config = dict(
         dict(type='TensorboardLoggerHook')
     ])
 
-checkpoint_config = dict(interval=1)
+checkpoint_config = dict(interval=2)
+
