@@ -1,3 +1,11 @@
+# BEvFormer-small consumes at lease 10500M GPU memory
+# compared to bevformer_base, bevformer_small has
+# smaller BEV: 200*200 -> 150*150
+# less encoder layers: 6 -> 3
+# smaller input size: 1600*900 -> (1600*900)*0.8
+# multi-scale feautres -> single scale features (C5)
+# with_cp of backbone = True
+
 _base_ = [
     '../datasets/custom_nus-3d.py',
     '../_base_/default_runtime.py'
@@ -10,7 +18,6 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 # cloud range accordingly
 point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 voxel_size = [0.2, 0.2, 8]
-
 
 
 img_norm_cfg = dict(
@@ -31,33 +38,34 @@ input_modality = dict(
 _dim_ = 256
 _pos_dim_ = _dim_//2
 _ffn_dim_ = _dim_*2
-_num_levels_ = 4
-bev_h_ = 200
-bev_w_ = 200
-queue_length = 4 # each sequence contains `queue_length` frames.
+_num_levels_ = 1
+bev_h_ = 150
+bev_w_ = 150
+queue_length = 3 # each sequence contains `queue_length` frames.
 
 model = dict(
-    type='BEVFormer',
+    type='BEVFormerFusion',
     use_grid_mask=True,
     video_test_mode=True,
     img_backbone=dict(
         type='ResNet',
         depth=101,
         num_stages=4,
-        out_indices=(1, 2, 3),
+        out_indices=(3,),
         frozen_stages=1,
         norm_cfg=dict(type='BN2d', requires_grad=False),
         norm_eval=True,
         style='caffe',
+        with_cp=True, # using checkpoint to save GPU memory
         dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
         stage_with_dcn=(False, False, True, True)),
     img_neck=dict(
         type='FPN',
-        in_channels=[512, 1024, 2048],
+        in_channels=[2048],
         out_channels=_dim_,
         start_level=0,
         add_extra_convs='on_output',
-        num_outs=4,
+        num_outs=_num_levels_,
         relu_before_extra_convs=True),
     pts_bbox_head=dict(
         type='BEVFormerHead',
@@ -77,7 +85,7 @@ model = dict(
             embed_dims=_dim_,
             encoder=dict(
                 type='BEVFormerEncoder',
-                num_layers=6,
+                num_layers=3,
                 pc_range=point_cloud_range,
                 num_points_in_pillar=4,
                 return_intermediate=False,
@@ -161,7 +169,7 @@ model = dict(
     pts_voxel_layer=dict(
         max_num_points=20,  # 每个体素中最多20个点 
         point_cloud_range=point_cloud_range,
-        voxel_size=voxel_size, 
+        voxel_size=voxel_size,    # voxel_size = [0.2, 0.2, 8]
         max_voxels=(30000, 40000)),
     pts_voxel_encoder=dict(
         type='PillarFeatureNet',
@@ -206,7 +214,7 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'CustomNuScenesDataset'
-data_root = 'data/nuscenes/'
+data_root = './data/nuscenes/'
 # data_root = './data/nus_extend/'
 file_client_args = dict(backend='disk')
 
@@ -227,21 +235,21 @@ train_pipeline = [
         use_dim=[0, 1, 2, 3, 4],
         pad_empty_sweeps=True,
         remove_close=True,
-        file_client_args=file_client_args),   
+        file_client_args=file_client_args),
     
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectNameFilter', classes=class_names),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
+    dict(type='RandomScaleImageMultiViewImage', scales=[0.8]),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
-    dict(type='CustomCollect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img'])
+    dict(type='CustomCollect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'points'])
 ]
 
 test_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
-    
     # dict(type='PadMultiViewImage', size_divisor=32),
     
     #TODO 3: replace the 'None' values in the following code with correct expressions.
@@ -259,7 +267,7 @@ test_pipeline = [
         use_dim=[0, 1, 2, 3, 4],
         pad_empty_sweeps=True,
         remove_close=True,
-        file_client_args=file_client_args),    
+        file_client_args=file_client_args), 
     
     dict(
         type='MultiScaleFlipAug3D',
@@ -267,7 +275,7 @@ test_pipeline = [
         pts_scale_ratio=1,
         flip=False,
         transforms=[
-            dict(type='RandomScaleImageMultiViewImage', scales=[0.5]),
+            dict(type='RandomScaleImageMultiViewImage', scales=[0.8]),
             dict(type='PadMultiViewImage', size_divisor=32),
             dict(
                 type='DefaultFormatBundle3D',
@@ -329,7 +337,10 @@ total_epochs = 6
 evaluation = dict(interval=2, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
+
 load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+# load_from = 'work_dirs/bevformer_small_fusion/latest.pth'
+
 log_config = dict(
     interval=50,
     hooks=[
