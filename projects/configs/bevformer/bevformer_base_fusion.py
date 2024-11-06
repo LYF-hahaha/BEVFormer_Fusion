@@ -49,11 +49,12 @@ model = dict(
         norm_cfg=dict(type='BN2d', requires_grad=False),
         norm_eval=True,
         style='caffe',
-        dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
+        dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False),    # original DCNv2 will print log when perform load_state_dict
         stage_with_dcn=(False, False, True, True)),
     img_neck=dict(
         type='FPN',
         in_channels=[512, 1024, 2048],
+        # in_channels=[2048],
         out_channels=_dim_,
         start_level=0,
         add_extra_convs='on_output',
@@ -206,9 +207,9 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'CustomNuScenesDataset'
-data_root = 'data/nuscenes/'
-# data_root = './data/nus_extend/' # 这里面就是train.pkl、test.pkl、val.pkl、maps、samples、sweeps、v1.0-trainval、v1.0-test
-# data_root = './data_nas/nuscenes_us/'
+# data_root = 'data/nuscenes/'  
+# data_root = './data/nus_extend/'   # 这里面就是train.pkl、test.pkl、val.pkl、maps、samples、sweeps、v1.0-trainval、v1.0-test
+data_root = './data_nas/nuscenes_us/'
 file_client_args = dict(backend='disk')
 
 
@@ -234,6 +235,7 @@ train_pipeline = [
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectNameFilter', classes=class_names),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
+    # dict(type='RandomScaleImageMultiViewImage', scales=[0.5]),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(type='CustomCollect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'points'])

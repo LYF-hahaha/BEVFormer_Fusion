@@ -283,8 +283,9 @@ test_pipeline = [
 ]
 
 dataset_type = 'CustomNuScenesDataset'
-data_root = './data/nus_extend/'
 # data_root = './data/nuscenes/'
+# data_root = './data/nus_extend/'   # 这里面就是train.pkl、test.pkl、val.pkl、maps、samples、sweeps、v1.0-trainval、v1.0-test
+data_root = './data_nas/nuscenes_us/'
 
 data = dict(
     samples_per_gpu=1,

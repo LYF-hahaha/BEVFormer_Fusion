@@ -184,18 +184,20 @@ class BEVFormerEncoder(TransformerLayerSequence):
 
         output = bev_query
         intermediate = []
-
+        # (50,50,4)
         ref_3d = self.get_reference_points(
             bev_h, bev_w, self.pc_range[5]-self.pc_range[2], self.num_points_in_pillar, dim='3d', bs=bev_query.size(1),  device=bev_query.device, dtype=bev_query.dtype)
+        # (50,50)
         ref_2d = self.get_reference_points(
             bev_h, bev_w, dim='2d', bs=bev_query.size(1), device=bev_query.device, dtype=bev_query.dtype)
-
+        # BEV空间感知范围：前后左右51.2m，上3m，下-5m
+        # 获取ref_3d在img上的投影点
         reference_points_cam, bev_mask = self.point_sampling(
             ref_3d, self.pc_range, kwargs['img_metas'])
 
         # bug: this code should be 'shift_ref_2d = ref_2d.clone()', we keep this bug for reproducing our results in paper.
         shift_ref_2d = ref_2d.clone()
-        shift_ref_2d += shift[:, None, None, :]
+        shift_ref_2d += shift[:, None, None, :]  # 通过can_bus算出来的帧间bev_grid偏移量
 
         # (num_query, bs, embed_dims) -> (bs, num_query, embed_dims)
         bev_query = bev_query.permute(1, 0, 2)
@@ -203,14 +205,16 @@ class BEVFormerEncoder(TransformerLayerSequence):
         bs, len_bev, num_bev_level, _ = ref_2d.shape
         if prev_bev is not None:
             prev_bev = prev_bev.permute(1, 0, 2)
+            # bev_query与prev_bev融合
             prev_bev = torch.stack(
                 [prev_bev, bev_query], 1).reshape(bs*2, len_bev, -1)
+            # 平移前后的ref_2d点融合
             hybird_ref_2d = torch.stack([shift_ref_2d, ref_2d], 1).reshape(
                 bs*2, len_bev, num_bev_level, 2)
         else:
             hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(
                 bs*2, len_bev, num_bev_level, 2)
-
+        # 6个bevformer_layer
         for lid, layer in enumerate(self.layers):
             output = layer(
                 bev_query,

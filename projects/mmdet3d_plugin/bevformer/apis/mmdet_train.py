@@ -84,11 +84,11 @@ def custom_train_detector(model,
                 broadcast_buffers=False,
                 find_unused_parameters=find_unused_parameters)
     else:
-        model = MMDataParallel(
-            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+        model = MMDataParallel(model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+        # cfg.gpu_ids[0]=0  cfg.gpu_ids=range(0,1)  
+        # model = MMDataParallel(model.cuda(1), device_ids=1)
         if eval_model is not None:
-            eval_model = MMDataParallel(
-                eval_model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+            eval_model = MMDataParallel(eval_model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
 
 
     # build runner

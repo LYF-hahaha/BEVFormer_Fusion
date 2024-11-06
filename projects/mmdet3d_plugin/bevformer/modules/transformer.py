@@ -124,6 +124,7 @@ class PerceptionTransformer(BaseModule):
         bev_pos = bev_pos.flatten(2).permute(2, 0, 1)
 
         # obtain rotation angle and shift with ego motion
+        # 获取上一帧到当前帧的相对运动（用于计算prev_bev到当前帧的bev_grid相对运动，以进行temproal_self_attention）
         delta_x = np.array([each['can_bus'][0]
                            for each in kwargs['img_metas']])
         delta_y = np.array([each['can_bus'][1]
@@ -163,11 +164,12 @@ class PerceptionTransformer(BaseModule):
         # add can bus signals
         can_bus = bev_queries.new_tensor(
             [each['can_bus'] for each in kwargs['img_metas']])  # [:, :]
-        can_bus = self.can_bus_mlp(can_bus)[None, :, :]
+        can_bus = self.can_bus_mlp(can_bus)[None, :, :]    # can_bus info直接mlp，搞笑一样
         bev_queries = bev_queries + can_bus * self.use_can_bus
 
         feat_flatten = []
         spatial_shapes = []
+        # cam_info & level_info 学习权重 
         for lvl, feat in enumerate(mlvl_feats):
             bs, num_cam, c, h, w = feat.shape
             spatial_shape = (h, w)
@@ -189,16 +191,16 @@ class PerceptionTransformer(BaseModule):
             0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims)
 
         bev_embed = self.encoder(
-            bev_queries,
-            feat_flatten,
-            feat_flatten,
+            bev_queries,     # Q
+            feat_flatten,    # K
+            feat_flatten,    # V
             bev_h=bev_h,
             bev_w=bev_w,
             bev_pos=bev_pos,
             spatial_shapes=spatial_shapes,
             level_start_index=level_start_index,
             prev_bev=prev_bev,
-            shift=shift,
+            shift=shift,    # 前面can_bus算出来的帧间bev_grid相对运动
             **kwargs
         )
 

@@ -103,14 +103,15 @@ class DetectionTransformerDecoder(TransformerLayerSequence):
             output = output.permute(1, 0, 2)
 
             if reg_branches is not None:
-                tmp = reg_branches[lid](output)  # 一堆Linear&ReLU
+                tmp = reg_branches[lid](output)  # 一堆Linear&ReLU （lid用来指定与layer对应的FFN层）
 
                 assert reference_points.shape[-1] == 3
 
                 new_reference_points = torch.zeros_like(reference_points)
                 # 用一轮transformer的query(output)更新reg_points
+                # 这里也就是迭代过程
                 new_reference_points[..., :2] = tmp[
-                    ..., :2] + inverse_sigmoid(reference_points[..., :2])
+                    ..., :2] + inverse_sigmoid(reference_points[..., :2])    # 逆sigmoid运算
                 new_reference_points[..., 2:3] = tmp[
                     ..., 4:5] + inverse_sigmoid(reference_points[..., 2:3])
 
