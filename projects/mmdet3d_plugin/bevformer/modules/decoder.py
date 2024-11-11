@@ -90,10 +90,22 @@ class DetectionTransformerDecoder(TransformerLayerSequence):
         output = query
         intermediate = []
         intermediate_reference_points = []
+        
+        # print('decoder:')
+        # exchange = 1024**3
+        # a = torch.cuda.memory_allocated()/exchange
+        # b = torch.cuda.memory_reserved()/exchange
+        # print("  allocated:{:.2f}GB".format(a))
+        # print("  reserved:{:.2f}GB".format(b))
         for lid, layer in enumerate(self.layers):
-
-            reference_points_input = reference_points[..., :2].unsqueeze(2)  # BS NUM_QUERY NUM_LEVEL 2
-        # self_atten, cross_atten在这里 
+            reference_points_input = reference_points[..., :2].unsqueeze(2)  # BS NUM_QUERY NUM_LEVEL 2                  
+            # print(f'    round-{lid}')
+            # exchange = 1024**3
+            # c = torch.cuda.memory_allocated()/exchange
+            # d = torch.cuda.memory_reserved()/exchange
+            # print("      allocated:{:.2f}GB".format(c))
+            # print("      reserved:{:.2f}GB".format(d))
+            # self_atten, cross_atten在这里面 BaseTransformerLayer
             output = layer(
                 output,
                 *args,

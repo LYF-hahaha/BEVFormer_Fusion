@@ -9,6 +9,10 @@ PORT=${PORT:-28509}
 # python -m torch.distributed.run --nproc_per_node=$GPUS --master_port=$PORT \
 #     $(dirname "$0")/train.py $CONFIG --launcher pytorch ${@:3} --deterministic
 
+# PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
+# python -m torch.distributed.launch --nproc_per_node=$GPUS --master_port=$PORT \
+#     $(dirname "$0")/train.py $CONFIG --launcher pytorch ${@:3} --deterministic
+
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
-python -m torch.distributed.launch --nproc_per_node=$GPUS --master_port=$PORT \
-    $(dirname "$0")/train.py $CONFIG --launcher pytorch ${@:3} --deterministic
+nohup python -m torch.distributed.launch --nproc_per_node=$GPUS --master_port=$PORT \
+    $(dirname "$0")/train.py $CONFIG --launcher pytorch ${@:3} --deterministic >> nohup_small.out 2>&1 &

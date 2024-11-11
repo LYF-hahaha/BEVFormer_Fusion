@@ -245,15 +245,18 @@ class BEVFormerFusion(MVXTwoStageDetector):
             prev_bev = None
             bs, len_queue, num_cams, C, H, W = imgs_queue.shape     # 不止拿一张照片,多张提升数据可靠性,在tiny里是2
             imgs_queue = imgs_queue.reshape(bs*len_queue, num_cams, C, H, W)
+            # 这里已经调用过一次ext_feat了
             img_feats_list = self.extract_feat(img=imgs_queue, points=points, len_queue=len_queue)[0]  # 这后面一个[0]把pts_feat给去了
             for i in range(len_queue):
                 img_metas = [each[i] for each in img_metas_list]
                 if not img_metas[0]['prev_bev_exists']:
                     prev_bev = None
                 # img_feats = self.extract_feat(img=img, img_metas=img_metas)
+                # img_feats_list[0].shape=[1,2,6,256,23,40], dim=1的2就是为了这里来两次，以获得有prev_bev输入的prev_bev
                 img_feats = [each_scale[:, i] for each_scale in img_feats_list]
-                prev_bev = self.pts_bbox_head(
-                    img_feats, points, img_metas, prev_bev, only_bev=True)  # 第一帧prev_bev=None, 第一帧encoder(没用decoder)输出的bev_embed就是第二针的prev_bev
+                prev_bev = self.pts_bbox_head(img_feats, points, 
+                                              img_metas, prev_bev, 
+                                              only_bev=True)  # 第一帧prev_bev=None, 第一帧encoder(没用decoder)输出的bev_embed就是第二帧的prev_bev
             self.train()
             return prev_bev
 
@@ -295,11 +298,12 @@ class BEVFormerFusion(MVXTwoStageDetector):
             dict: Losses of different branches.
         """
         
-        len_queue = img.size(1)
+        len_queue = img.size(1)   # 这里的值是由cfg文件中queue_length=3定的
         prev_img = img[:, :-1, ...]
         img = img[:, -1, ...]
 
         prev_img_metas = copy.deepcopy(img_metas)
+        # 这里就已经走了两次encoder了（里面就已经调用过ext_feat了）
         prev_bev = self.obtain_history_bev(prev_img, points, prev_img_metas)
 
         img_metas = [each[len_queue-1] for each in img_metas]
@@ -310,6 +314,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
         # img_feats = torch.Size([1, 6, 256, 15, 25])
         # pts_feats = torch.Size([1, 384, 128, 128])
         losses = dict()
+        # 这里走第三次encoder
         losses_pts = self.forward_pts_train(img_feats, pts_feats, gt_bboxes_3d,
                                             gt_labels_3d, img_metas,
                                             gt_bboxes_ignore, prev_bev)

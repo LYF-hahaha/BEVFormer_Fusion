@@ -138,10 +138,16 @@ class BEVFormerHead(DETRHead):
 
         bev_mask = torch.zeros((bs, self.bev_h, self.bev_w),
                                device=bev_queries.device).to(dtype)
+        # mmdet里的一个位置编码生成函数，叫LearnedPositionalEncoding
+        # 输入一个shape=[bs, h, w]的图片mask，0代表忽略、1代表合法
+        # 输出是位置编码shape=[bs, num_feats*2, h, w]
+        # 但行或列生成编码的方式是nn.Embedding(col_num_embed, num_feats)，其中col_num_embed是shape的range
         bev_pos = self.positional_encoding(bev_mask).to(dtype)
 
         if only_bev:  # only use encoder to obtain BEV features, TODO: refine the workaround
-            return self.transformer.get_bev_features(   # 只走 transformer.py 的encoder部分
+            # 只走 transformer.py 的encoder部分 （每个场景要获得prev_bev的时候会先走两次这里，因为每个场景会至少选两组img，以提升可靠性）
+            # obtain_prev_bev会调用到这里，img_queue=2，所以会走两次这里，用两组img获得prev_bev
+            return self.transformer.get_bev_features(   
                 mlvl_feats,
                 bev_queries,
                 self.bev_h,
@@ -212,7 +218,13 @@ class BEVFormerHead(DETRHead):
             'enc_cls_scores': None,
             'enc_bbox_preds': None,
         }
-
+        
+        # print('return outs:')
+        # exchange = 1024**3
+        # a = (torch.cuda.memory_allocated())/exchange
+        # b = (torch.cuda.memory_reserved())/exchange
+        # print("  allocated:{:.2f}GB".format(a))
+        # print("  reserved:{:.2f}GB\n".format(b))
         return outs
         
 

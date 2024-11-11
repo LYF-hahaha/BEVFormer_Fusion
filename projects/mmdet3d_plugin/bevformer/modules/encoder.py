@@ -185,15 +185,14 @@ class BEVFormerEncoder(TransformerLayerSequence):
         output = bev_query
         intermediate = []
         # (50,50,4)
-        ref_3d = self.get_reference_points(
-            bev_h, bev_w, self.pc_range[5]-self.pc_range[2], self.num_points_in_pillar, dim='3d', bs=bev_query.size(1),  device=bev_query.device, dtype=bev_query.dtype)
+        ref_3d = self.get_reference_points(bev_h, bev_w, self.pc_range[5]-self.pc_range[2], self.num_points_in_pillar, 
+                                           dim='3d', bs=bev_query.size(1),  device=bev_query.device, dtype=bev_query.dtype)
         # (50,50)
-        ref_2d = self.get_reference_points(
-            bev_h, bev_w, dim='2d', bs=bev_query.size(1), device=bev_query.device, dtype=bev_query.dtype)
+        ref_2d = self.get_reference_points(bev_h, bev_w, 
+                                           dim='2d', bs=bev_query.size(1), device=bev_query.device, dtype=bev_query.dtype)
         # BEV空间感知范围：前后左右51.2m，上3m，下-5m
-        # 获取ref_3d在img上的投影点
-        reference_points_cam, bev_mask = self.point_sampling(
-            ref_3d, self.pc_range, kwargs['img_metas'])
+        # 获取ref_3d在img上的投影点(lidar2cam)
+        reference_points_cam, bev_mask = self.point_sampling(ref_3d, self.pc_range, kwargs['img_metas'])
 
         # bug: this code should be 'shift_ref_2d = ref_2d.clone()', we keep this bug for reproducing our results in paper.
         shift_ref_2d = ref_2d.clone()
@@ -205,17 +204,27 @@ class BEVFormerEncoder(TransformerLayerSequence):
         bs, len_bev, num_bev_level, _ = ref_2d.shape
         if prev_bev is not None:
             prev_bev = prev_bev.permute(1, 0, 2)
-            # bev_query与prev_bev融合
-            prev_bev = torch.stack(
-                [prev_bev, bev_query], 1).reshape(bs*2, len_bev, -1)
+            # prev_bev与bev_query融合
+            prev_bev = torch.stack([prev_bev, bev_query], 1).reshape(bs*2, len_bev, -1)
             # 平移前后的ref_2d点融合
-            hybird_ref_2d = torch.stack([shift_ref_2d, ref_2d], 1).reshape(
-                bs*2, len_bev, num_bev_level, 2)
+            hybird_ref_2d = torch.stack([shift_ref_2d, ref_2d], 1).reshape(bs*2, len_bev, num_bev_level, 2)
         else:
-            hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(
-                bs*2, len_bev, num_bev_level, 2)
-        # 6个bevformer_layer
+            hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(bs*2, len_bev, num_bev_level, 2)
+            
+        # 6轮bevformer_layer
+        # print('encoder:')
+        # exchange = 1024**3
+        # a = (torch.cuda.memory_allocated())/exchange
+        # b = (torch.cuda.memory_reserved())/exchange
+        # print("  allocated:{:.2f}GB".format(a))
+        # print("  reserved:{:.2f}GB".format(b))
         for lid, layer in enumerate(self.layers):
+            # print(f'    round-{lid}:')
+            # exchange = 1024**3
+            # c = torch.cuda.memory_allocated()/exchange
+            # d = torch.cuda.memory_reserved()/exchange
+            # print("      allocated:{:.2f}GB".format(c))
+            # print("      reserved:{:.2f}GB".format(d))
             output = layer(
                 bev_query,
                 key,
@@ -356,11 +365,11 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
                                                      f'attn_masks {len(attn_masks)} must be equal ' \
                                                      f'to the number of attention in ' \
                 f'operation_order {self.num_attn}'
-
+                
         for layer in self.operation_order:
             # temporal self attention
             if layer == 'self_attn':
-
+                # print(f"layer: {layer}")
                 query = self.attentions[attn_index](
                     query,
                     prev_bev,
@@ -379,11 +388,13 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
                 identity = query
 
             elif layer == 'norm':
+                # print(f"layer: {layer}")
                 query = self.norms[norm_index](query)
                 norm_index += 1
 
             # spaital cross attention
             elif layer == 'cross_attn':
+                # print(f"layer: {layer}")
                 query = self.attentions[attn_index](
                     query,
                     key,
@@ -403,10 +414,11 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
                 identity = query
 
             elif layer == 'ffn':
+                # print(f"layer: {layer}")
                 query = self.ffns[ffn_index](
                     query, identity if self.pre_norm else None)
                 ffn_index += 1
-
+            
         return query
 
 

@@ -29,6 +29,8 @@ from mmseg import __version__ as mmseg_version
 
 from mmcv.utils import TORCH_VERSION, digit_version
 
+from torchsummary import summary
+from torchstat import stat
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -97,6 +99,18 @@ def parse_args():
         args.cfg_options = args.options
 
     return args
+
+
+def model_cal(m):
+    model = m
+    total_params = sum(p.numel() for p in model.parameters())
+    total_params += sum(p.numel() for p in model.buffers())
+    print(f'{total_params:,} total parameters.')
+    print(f'{total_params/(1024*1024):.2f}M total parameters.')
+    total_trainable_params = sum(
+        p.numel() for p in model.parameters() if p.requires_grad)
+    print(f'{total_trainable_params:,} training parameters.')
+    print(f'{total_trainable_params/(1024*1024):.2f}M training parameters.')
 
 
 def main():
@@ -257,7 +271,11 @@ def main():
         validate=(not args.no_validate),
         timestamp=timestamp,
         meta=meta)
-
+    
+    # summary(model, datasets)
+    # stat(model, (3,1280,720))
+    # model_cal(model)
+    
 
 if __name__ == '__main__':
     main()

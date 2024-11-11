@@ -265,8 +265,15 @@ class PerceptionTransformer(BaseModule):
             grid_length=grid_length,
             bev_pos=bev_pos,
             prev_bev=prev_bev,
-            **kwargs)  
-
+            **kwargs)
+          
+        # print('pre-fusion:')
+        # exchange = 1024**3
+        # a = (torch.cuda.memory_allocated())/exchange
+        # b = (torch.cuda.memory_reserved())/exchange
+        # print("  allocated:{:.2f}GB".format(a))
+        # print("  reserved:{:.2f}GB".format(b))
+        
         img_bev_feat_orig = img_bev_feature.clone().detach()
         
         bs = mlvl_feats[0].size(0)
@@ -297,17 +304,25 @@ class PerceptionTransformer(BaseModule):
         # [bs, self.embed_dims, BEV_H_align, BEV_W_align]-->[bs, BEV_H_align*BEV_W_align, self.embed_dims]
         bev_embed = bev_embed.reshape(bs,self.embed_dims, BEV_H_align*BEV_W_align).permute(0,2,1)
         
-        query_pos, query = torch.split(
-            object_query_embed, self.embed_dims, dim=1)
+        # object_query_embed在这里被分解成了query_pos和query
+        query_pos, query = torch.split(object_query_embed, self.embed_dims, dim=1)
         query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1)
         query = query.unsqueeze(0).expand(bs, -1, -1)
-        reference_points = self.reference_points(query_pos)
+        
+        reference_points = self.reference_points(query_pos)   # nn.Linear
         reference_points = reference_points.sigmoid()
         init_reference_out = reference_points
 
         query = query.permute(1, 0, 2)
         query_pos = query_pos.permute(1, 0, 2)
         bev_embed = bev_embed.permute(1, 0, 2)
+        
+        # print('post-fusion:')
+        # exchange = 1024**3
+        # a = (torch.cuda.memory_allocated())/exchange
+        # b = (torch.cuda.memory_reserved())/exchange
+        # print("  allocated:{:.2f}GB".format(a))
+        # print("  reserved:{:.2f}GB".format(b))
 
         inter_states, inter_references = self.decoder(
             query=query,
