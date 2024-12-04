@@ -351,8 +351,8 @@ class BEVFormerFusion(MVXTwoStageDetector):
 
         # 注意，这里把上一帧的img_bev_feats赋值给new_prev_bev了
         # 而返回的原先new_prev_bev (即带pts的fusion_embed丢弃了)
-        new_prev_bev, _, bbox_results = self.simple_test(
-            img_metas[0], img[0], points[0], prev_bev=self.prev_frame_info['prev_bev'], **kwargs)
+        new_prev_bev, _, bbox_results = self.simple_test(img_metas[0], img[0], points[0],
+                                                         prev_bev=self.prev_frame_info['prev_bev'], **kwargs)
         # During inference, we save the BEV features and ego motion of each timestamp.
         self.prev_frame_info['prev_pos'] = tmp_pos
         self.prev_frame_info['prev_angle'] = tmp_angle
@@ -369,8 +369,8 @@ class BEVFormerFusion(MVXTwoStageDetector):
         img_feats, pts_feats = self.extract_feat(img, points, img_metas)
 
         bbox_list = [dict() for i in range(len(img_metas))]
-        img_bev_feature, new_prev_bev, bbox_pts = self.simple_test_pts(
-            img_feats, pts_feats, img_metas, prev_bev, rescale=rescale)
+        img_bev_feature, new_prev_bev, bbox_pts = self.simple_test_pts(img_feats, pts_feats, 
+                                                                       img_metas, prev_bev, rescale=rescale)
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
         
@@ -384,6 +384,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
         
         bbox_list = self.pts_bbox_head.get_bboxes(
             outs, img_metas, rescale=rescale)
+        # mmdet3d自带函数，主要是把结果放回CPU
         bbox_results = [
             bbox3d2result(bboxes, scores, labels)
             for bboxes, scores, labels in bbox_list

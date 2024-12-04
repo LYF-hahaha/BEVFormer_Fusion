@@ -108,6 +108,17 @@ def parse_args():
         args.eval_options = args.options
     return args
 
+def model_cal(m):
+    model = m
+    total_params = sum(p.numel() for p in model.parameters())
+    total_params += sum(p.numel() for p in model.buffers())
+    print(f'{total_params:,} total parameters.')
+    print(f'{total_params/(1024*1024):.2f}M total parameters.')
+    total_trainable_params = sum(
+        p.numel() for p in model.parameters() if p.requires_grad)
+    print(f'{total_trainable_params:,} training parameters.')
+    print(f'{total_trainable_params/(1024*1024):.2f}M training parameters.')
+
 
 def main():
     args = parse_args()
@@ -231,13 +242,15 @@ def main():
         # assert False
         model = MMDataParallel(model, device_ids=[0])
         # 载入数据和模型后开始单GPU测试，并输出结果 (所以换full测试集后会时间多很多)
+        # 但这里并不会评价
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
             # len(outputs)  6019
             # outputs[0]['pts_bbox'].keys()  dict_keys(['boxes_3d', 'scores_3d', 'labels_3d'])
             # outputs[0]['pts_bbox']['boxes_3d'].tensor.shape  torch.Size([300, 9]) 
             # outputs[0]['pts_bbox']['scores_3d'].shape        torch.Size([300])
             # outputs[0]['pts_bbox']['labels_3d'].shape        torch.Size([300])
-
+        # model_cal(model)
+        
     else:
         model = MMDistributedDataParallel(
             model.cuda(),
@@ -259,11 +272,13 @@ def main():
             assert False
             #mmcv.dump(outputs['bbox_results'], args.out)
         kwargs = {} if args.eval_options is None else args.eval_options  # eval_options=None
+        # result_nusc.json前缀生成（从config文件路径中截取）
         kwargs['jsonfile_prefix'] = osp.join('test', args.config.split(
             '/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_'))
         if args.format_only:
             dataset.format_results(outputs, **kwargs)
-
+            
+        # 在这里开始的评价（pred与gt对比）
         if args.eval:  # bbox
             eval_kwargs = cfg.get('evaluation', {}).copy()
             # hard-code way to remove EvalHook args
@@ -273,7 +288,8 @@ def main():
             ]:
                 eval_kwargs.pop(key, None)  # 按照key在kwargs里边,找到对应的值. 如果有就返回key,并且从kwargs中删除掉;如果没有这个key,就返回None
             eval_kwargs.update(dict(metric=args.eval, **kwargs))  # 新增了'metric','jsonfile_prefix' 这两个key
-
+            # 这里用的mmcv自带的nuscenes dataset评价函数
+            # /opt/conda/envs/open-mmlab/lib/python3.8/site-packages/mmdet3d-0.17.1-py3.8-linux-x86_64.egg/mmdet3d/datasets/nuscenes_dataset.py
             print(dataset.evaluate(outputs, **eval_kwargs))
 
 

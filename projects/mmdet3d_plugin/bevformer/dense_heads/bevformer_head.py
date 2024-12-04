@@ -195,12 +195,9 @@ class BEVFormerHead(DETRHead):
             tmp[..., 0:2] = tmp[..., 0:2].sigmoid()
             tmp[..., 4:5] += reference[..., 2:3]
             tmp[..., 4:5] = tmp[..., 4:5].sigmoid()
-            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] -
-                             self.pc_range[0]) + self.pc_range[0])
-            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] -
-                             self.pc_range[1]) + self.pc_range[1])
-            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] -
-                             self.pc_range[2]) + self.pc_range[2])
+            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] - self.pc_range[0]) + self.pc_range[0])
+            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] - self.pc_range[1]) + self.pc_range[1])
+            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] - self.pc_range[2]) + self.pc_range[2])
 
             # TODO: check if using sigmoid
             outputs_coord = tmp
@@ -385,8 +382,7 @@ class BEVFormerHead(DETRHead):
                 cls_scores.new_tensor([cls_avg_factor]))
 
         cls_avg_factor = max(cls_avg_factor, 1)
-        loss_cls = self.loss_cls(
-            cls_scores, labels, label_weights, avg_factor=cls_avg_factor)
+        loss_cls = self.loss_cls(cls_scores, labels, label_weights, avg_factor=cls_avg_factor)
 
         # Compute the average number of gt boxes accross all gpus, for
         # normalization purposes
@@ -398,7 +394,7 @@ class BEVFormerHead(DETRHead):
         normalized_bbox_targets = normalize_bbox(bbox_targets, self.pc_range)
         isnotnan = torch.isfinite(normalized_bbox_targets).all(dim=-1)
         bbox_weights = bbox_weights * self.code_weights
-
+        # 直接调用的mmcv里写好的工具 L1 loss
         loss_bbox = self.loss_bbox(bbox_preds[isnotnan, :10], 
                                    normalized_bbox_targets[isnotnan,:10], 
                                    bbox_weights[isnotnan, :10],
@@ -454,9 +450,9 @@ class BEVFormerHead(DETRHead):
         num_dec_layers = len(all_cls_scores)
         device = gt_labels_list[0].device
 
-        gt_bboxes_list = [torch.cat(
-            (gt_bboxes.gravity_center, gt_bboxes.tensor[:, 3:]),
-            dim=1).to(device) for gt_bboxes in gt_bboxes_list]
+        gt_bboxes_list = [torch.cat((gt_bboxes.gravity_center, 
+                                     gt_bboxes.tensor[:, 3:]),
+                                     dim=1).to(device) for gt_bboxes in gt_bboxes_list]
 
         all_gt_bboxes_list = [gt_bboxes_list for _ in range(num_dec_layers)]
         all_gt_labels_list = [gt_labels_list for _ in range(num_dec_layers)]
@@ -516,7 +512,7 @@ class BEVFormerHead(DETRHead):
             bboxes[:, 2] = bboxes[:, 2] - bboxes[:, 5] * 0.5
 
             code_size = bboxes.shape[-1]
-            bboxes = img_metas[i]['box_type_3d'](bboxes, code_size)
+            bboxes = img_metas[i]['box_type_3d'](bboxes, code_size) # LiDARInstance3DBoxes 这里赋值的bottom_center, gravity_center等内容
             scores = preds['scores']
             labels = preds['labels']
 

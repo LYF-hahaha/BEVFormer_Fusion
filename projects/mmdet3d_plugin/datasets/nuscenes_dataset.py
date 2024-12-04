@@ -209,7 +209,7 @@ class CustomNuScenesDataset(NuScenesDataset):
             'v1.0-mini': 'mini_val',
             'v1.0-trainval': 'val',
         }
-        self.nusc_eval = NuScenesEval_custom(
+        self.nusc_eval = NuScenesEval_custom(    # Loaded ground truth annotations for 81 samples
             self.nusc,
             config=self.eval_detection_configs,
             result_path=result_path,
@@ -219,7 +219,7 @@ class CustomNuScenesDataset(NuScenesDataset):
             overlap_test=self.overlap_test,
             data_infos=self.data_infos
         )
-        self.nusc_eval.main(plot_examples=0, render_curves=False)
+        self.nusc_eval.main(plot_examples=0, render_curves=False)    # 在这里面完成的eval (pred与gt的对比，以及summary和details的生成)
         # record metrics
         metrics = mmcv.load(osp.join(output_dir, 'metrics_summary.json'))
         detail = dict()

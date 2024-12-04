@@ -212,7 +212,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
             hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(bs*2, len_bev, num_bev_level, 2)
             
         # 6轮bevformer_layer
-        # print('encoder:')
+        # print('\nencoder:')
         # exchange = 1024**3
         # a = (torch.cuda.memory_allocated())/exchange
         # b = (torch.cuda.memory_reserved())/exchange

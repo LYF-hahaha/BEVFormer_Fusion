@@ -25,8 +25,8 @@ from nuscenes.eval.common.data_classes import EvalBoxes, EvalBox
 from nuscenes.eval.detection.data_classes import DetectionBox
 from nuscenes.eval.detection.utils import category_to_detection_name
 from nuscenes.eval.detection.render import visualize_sample
-
-
+import os
+import json
 
 
 cams = ['CAM_FRONT',
@@ -272,7 +272,7 @@ def get_predicted_data(sample_data_token: str,
 
 
 
-def lidiar_render(sample_token, data,out_path=None):
+def lidiar_render(sample_token, data, out_path=None):
     bbox_gt_list = []
     bbox_pred_list = []
     anns = nusc.get('sample', sample_token)['anns']
@@ -314,7 +314,7 @@ def lidiar_render(sample_token, data,out_path=None):
     pred_annotations.add_boxes(sample_token, bbox_pred_list)
     print('green is ground truth')
     print('blue is the predited result')
-    visualize_sample(nusc, sample_token, gt_annotations, pred_annotations, savepath=out_path+'_bev')
+    visualize_sample(nusc, sample_token, gt_annotations, pred_annotations, savepath='result_vis/rend_orig_png_constr-veh/'+out_path+'_bev')
 
 
 def get_color(category_name: str):
@@ -362,7 +362,7 @@ def render_sample_data(
         show_lidarseg_legend: bool = False,
         filter_lidarseg_labels=None,
         lidarseg_preds_bin_path: str = None,
-        verbose: bool = True,
+        verbose: bool = False,
         show_panoptic: bool = False,
         pred_data=None,
       ) -> None:
@@ -416,9 +416,11 @@ def render_sample_data(
             assert False
         elif sensor_modality == 'camera':
             # Load boxes and image.
-            boxes = [Box(record['translation'], record['size'], Quaternion(record['rotation']),
-                         name=record['detection_name'], token='predicted') for record in
-                     pred_data['results'][sample_toekn] if record['detection_score'] > 0.2]
+            boxes = [Box(record['translation'], 
+                         record['size'], 
+                         Quaternion(record['rotation']),
+                         name=record['detection_name'], token='predicted') 
+                    for record in pred_data['results'][sample_toekn] if record['detection_score'] > 0.2]
 
             data_path, boxes_pred, camera_intrinsic = get_predicted_data(sample_data_token,
                                                                          box_vis_level=box_vis_level, pred_anns=boxes)
@@ -463,15 +465,45 @@ def render_sample_data(
         ax[j + 2, ind].set_aspect('equal')
 
     if out_path is not None:
-        plt.savefig(out_path+'_camera', bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.savefig('result_vis/rend_orig_png_constr-veh/'+out_path+'_camera', bbox_inches='tight', pad_inches=0, dpi=200)
     if verbose:
         plt.show()
     plt.close()
 
+# if __name__ == '__main__':
+#     # print (os.getcwd()) # 获得当前目录
+#     # print (os.path.abspath('.'))
+#     nusc = NuScenes(version='v1.0-trainval', dataroot='data/nus_extend', verbose=True)
+#     # render_annotation('7603b030b42a4b1caa8c443ccc1a7d52')
+#     bevformer_results = mmcv.load('test/bevformer_small_fusion/173_result/results_nusc__e6d6_epo8.json')
+#     sample_token_list = list(bevformer_results['results'].keys())
+#     for id in range(220, 500):
+#         print(f"{id}/500")
+#         render_sample_data(sample_token_list[id], pred_data=bevformer_results, out_path=sample_token_list[id])
+
+
+
+
+
 if __name__ == '__main__':
-    nusc = NuScenes(version='v1.0-trainval', dataroot='./data/nuscenes', verbose=True)
-    # render_annotation('7603b030b42a4b1caa8c443ccc1a7d52')
-    bevformer_results = mmcv.load('test/bevformer_base/Thu_Jun__9_16_22_37_2022/pts_bbox/results_nusc.json')
-    sample_token_list = list(bevformer_results['results'].keys())
-    for id in range(0, 10):
-        render_sample_data(sample_token_list[id], pred_data=bevformer_results, out_path=sample_token_list[id])
+    nusc = NuScenes(version='v1.0-trainval', dataroot='data/nus_extend', verbose=True)
+    bevformer_results = mmcv.load('test/bevformer_small_fusion/173_result/results_nusc__e6d6_epo8.json')
+    path_sample = 'result_vis/rend_sample_divide/sample_trainval.json'
+    f = open(path_sample,'r')
+    trainval_sample = json.load(f)
+    
+    # version = 'train'
+    version = 'val'
+    path = f'result_vis/rend_sample_divide/sample_div_cons-veh_{version}-set.json'
+    f = open(path,'r')
+    a = f.read()
+    cons_samp = json.loads(a)
+        
+    for c, i in enumerate(cons_samp[:10]):
+        print(f"png rend progress: {c+1}/10")
+        st_tk=i['start_token']
+        l = i['samp_len']
+        idx = trainval_sample.index(st_tk)
+        tk_list = trainval_sample[idx:idx+l]
+        for x in tqdm(tk_list):
+            render_sample_data(x, pred_data=bevformer_results, out_path=x)

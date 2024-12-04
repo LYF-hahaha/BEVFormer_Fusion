@@ -52,9 +52,11 @@ class NMSFreeCoder(BaseBBoxCoder):
         max_num = self.max_num
 
         cls_scores = cls_scores.sigmoid()
+        # topk会返回最大值和相应的索引
+        # 这里直接拉平后取300个，前提是900个10维度的one hot编码都是很有区分度，不会出现1编码中第二大的数比2编码中最大的数还大的情况
         scores, indexs = cls_scores.view(-1).topk(max_num)
         labels = indexs % self.num_classes
-        bbox_index = indexs // self.num_classes
+        bbox_index = indexs // self.num_classes  # 整除（向下取整）
         bbox_preds = bbox_preds[bbox_index]
        
         final_box_preds = denormalize_bbox(bbox_preds, self.pc_range)   
@@ -77,6 +79,7 @@ class NMSFreeCoder(BaseBBoxCoder):
                 self.post_center_range, device=scores.device)
             mask = (final_box_preds[..., :3] >=
                     self.post_center_range[:3]).all(1)
+            # 按位与
             mask &= (final_box_preds[..., :3] <=
                      self.post_center_range[3:]).all(1)
 

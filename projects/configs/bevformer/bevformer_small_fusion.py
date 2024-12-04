@@ -214,9 +214,9 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'CustomNuScenesDataset'
-# data_root = './data/nuscenes/'
+data_root = './data/nuscenes/'
 # data_root = './data/nus_extend/'   # 这里面就是train.pkl、test.pkl、val.pkl、maps、samples、sweeps、v1.0-trainval、v1.0-test
-data_root = './data_nas/nuscenes_us/'
+# data_root = './data_nas/nuscenes_us/'
 file_client_args = dict(backend='disk')
 
 

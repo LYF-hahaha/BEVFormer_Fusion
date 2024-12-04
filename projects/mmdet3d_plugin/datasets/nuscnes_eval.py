@@ -552,9 +552,12 @@ class NuScenesEval_custom(NuScenesEval):
         # Load data.
         if verbose:
             print('Initializing nuScenes detection evaluation')
-        self.pred_boxes, self.meta = load_prediction(self.result_path, self.cfg.max_boxes_per_sample, DetectionBox,
+        self.pred_boxes, self.meta = load_prediction(self.result_path, 
+                                                     self.cfg.max_boxes_per_sample, 
+                                                     DetectionBox,
                                                      verbose=verbose)
-        self.gt_boxes = load_gt(self.nusc, self.eval_set, DetectionBox_modified, verbose=verbose)
+        self.gt_boxes = load_gt(self.nusc, self.eval_set, 
+                                DetectionBox_modified, verbose=verbose)
 
         assert set(self.pred_boxes.sample_tokens) == set(self.gt_boxes.sample_tokens), \
             "Samples in split doesn't match samples in predictions."
@@ -638,17 +641,20 @@ class NuScenesEval_custom(NuScenesEval):
         # print(self.cfg.dist_fcn_callable, self.cfg.dist_ths)
         # self.cfg.dist_ths = [0.3]
         # self.cfg.dist_fcn_callable
-        for class_name in self.cfg.class_names:
-            for dist_th in self.cfg.dist_ths:
+        for class_name in self.cfg.class_names:    # 各个类别
+            for dist_th in self.cfg.dist_ths:      # 4个感知范围（0.5、1、2、4）
+                # 每个sample的每个类别的bbox都会与gt做匹配，将汇总的结果作为一个类返回（但此时里面已经没有了sample的信息，无法追溯error的可视化信息了）
                 md = accumulate(self.gt_boxes, self.pred_boxes, class_name, self.cfg.dist_fcn_callable, dist_th)
-                metric_data_list.set(class_name, dist_th, md)
+                # 生成metrics_summary.json所必要的数据
+                metric_data_list.set(class_name, dist_th, md)   
 
         # -----------------------------------
         # Step 2: Calculate metrics from the data.
         # -----------------------------------
         if self.verbose:
             print('Calculating metrics...')
-        metrics = DetectionMetrics(self.cfg)
+        # 汇总match结果信息
+        metrics = DetectionMetrics(self.cfg)   
         for class_name in self.cfg.class_names:
             # Compute APs.
             for dist_th in self.cfg.dist_ths:
