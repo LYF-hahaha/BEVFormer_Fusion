@@ -17,8 +17,8 @@ import copy
 import numpy as np
 import mmdet3d
 from projects.mmdet3d_plugin.models.utils.bricks import run_time
-
-
+import os
+import time
 @DETECTORS.register_module()
 class BEVFormerFusion(MVXTwoStageDetector):
     """BEVFormer.
@@ -180,7 +180,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
     @auto_fp16(apply_to=('img'))
     def extract_feat(self, img, points, img_metas=None, len_queue=None):
         """Extract features from images and points."""
-
+        # img.shape=2
         img_feats = self.extract_img_feat(img, img_metas, len_queue=len_queue)
         if points:
             pts_feats = self.extract_pts_feat(points)
@@ -210,9 +210,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
         Returns:
             dict: Losses of each branch.
         """
-
-        outs = self.pts_bbox_head(
-            img_feats, pts_feats, img_metas, prev_bev)
+        outs = self.pts_bbox_head(img_feats, pts_feats, img_metas, prev_bev)
         loss_inputs = [gt_bboxes_3d, gt_labels_3d, outs]
         losses = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
         return losses
@@ -248,7 +246,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
             # 这里已经调用过一次ext_feat了
             img_feats_list = self.extract_feat(img=imgs_queue, points=points, len_queue=len_queue)[0]  # 这后面一个[0]把pts_feat给去了
             for i in range(len_queue):
-                img_metas = [each[i] for each in img_metas_list]
+                img_metas = [each[i] for each in img_metas_list]   # 为保证prev_bev生成的时候是有prev_prev_bev的，所以取3帧
                 if not img_metas[0]['prev_bev_exists']:
                     prev_bev = None
                 # img_feats = self.extract_feat(img=img, img_metas=img_metas)
@@ -306,7 +304,10 @@ class BEVFormerFusion(MVXTwoStageDetector):
         # 这里就已经走了两次encoder了（里面就已经调用过ext_feat了）
         prev_bev = self.obtain_history_bev(prev_img, points, prev_img_metas)
 
-        img_metas = [each[len_queue-1] for each in img_metas]
+        # 这里len_queue=3是为确保t时刻的数据中prev_bev是完整的
+        # 如果只有t-1和t时刻，那么t-1的数据是缺少prev_bev信息的
+        # 此时对t-1来说，如果有t-2时刻能作为其prev_bev，那么t-1时刻的数据是完整的，进而确保t时刻prev_bev的信息是完整的
+        img_metas = [each[len_queue-1] for each in img_metas]  
         if not img_metas[0]['prev_bev_exists']:
             prev_bev = None
         # img_feats = self.extract_feat(img=img, img_metas=img_metas)

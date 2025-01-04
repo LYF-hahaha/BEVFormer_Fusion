@@ -18,7 +18,7 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 # cloud range accordingly
 point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 voxel_size = [0.2, 0.2, 8]
-
+4
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -214,8 +214,8 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'CustomNuScenesDataset'
-data_root = './data/nuscenes/'
-# data_root = './data/nus_extend/'   # 这里面就是train.pkl、test.pkl、val.pkl、maps、samples、sweeps、v1.0-trainval、v1.0-test
+# data_root = './data/nuscenes/'
+data_root = './data/nus_extend/'   # 这里面就是train.pkl、test.pkl、val.pkl、maps、samples、sweeps、v1.0-trainval、v1.0-test
 # data_root = './data_nas/nuscenes_us/'
 file_client_args = dict(backend='disk')
 

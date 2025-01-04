@@ -11,7 +11,7 @@ from mmdet.models.dense_heads import DETRHead
 from mmdet3d.core.bbox.coders import build_bbox_coder
 from projects.mmdet3d_plugin.core.bbox.util import normalize_bbox
 from mmcv.runner import force_fp32, auto_fp16
-
+import shutil
 
 @HEADS.register_module()
 class BEVFormerHead(DETRHead):
@@ -195,15 +195,25 @@ class BEVFormerHead(DETRHead):
             tmp[..., 0:2] = tmp[..., 0:2].sigmoid()
             tmp[..., 4:5] += reference[..., 2:3]
             tmp[..., 4:5] = tmp[..., 4:5].sigmoid()
+            
+            # 长 (-51.2, 51.2) 单位:m
             tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] - self.pc_range[0]) + self.pc_range[0])
+            # 宽 (-51.2, 51.2) 
             tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] - self.pc_range[1]) + self.pc_range[1])
+            # 高 (-5.0, 3.0)
             tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] - self.pc_range[2]) + self.pc_range[2])
 
             # TODO: check if using sigmoid
             outputs_coord = tmp
             outputs_classes.append(outputs_class)
             outputs_coords.append(outputs_coord)
-
+            
+        # name = ['Front','Front_Right','Front_Left','Back','Back_Left','Back_Right']
+        # for c,i in enumerate(img_metas[0]['filename']):
+        #     s_path = i
+        #     d_path = f'dev_data/img/{name[c]}.jpg'
+        #     shutil.copy(s_path, d_path)
+        
         outputs_classes = torch.stack(outputs_classes)
         outputs_coords = torch.stack(outputs_coords)
 

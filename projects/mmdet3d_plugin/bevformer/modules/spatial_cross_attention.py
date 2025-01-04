@@ -27,7 +27,6 @@ from projects.mmdet3d_plugin.models.utils.bricks import run_time
 ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
 
-
 @ATTENTION.register_module()
 class SpatialCrossAttention(BaseModule):
     """An attention module used in BEVFormer.
@@ -134,10 +133,15 @@ class SpatialCrossAttention(BaseModule):
         bs, num_query, _ = query.size()
 
         D = reference_points_cam.size(3)
+        # indexes里放的是bev投过来每个相机对应的有效坐标
         indexes = []
         for i, mask_per_img in enumerate(bev_mask):
+            # .nonzero() 得到数组array中非零元素的位置（数组索引）的函数
+            # .squeeze(-1) 将最后一个大小为1的维度去掉
             index_query_per_img = mask_per_img[0].sum(-1).nonzero().squeeze(-1)
             indexes.append(index_query_per_img)
+        # 多个相机中最大的有效点数，用这个来组新的batch.save.memory
+        # 真正的query数量是和这个有关系，最初的grids的数量只是一个初始化
         max_len = max([len(each) for each in indexes])
 
         # each camera only interacts with its corresponding BEV queries. This step can  greatly save GPU memory.
@@ -155,16 +159,21 @@ class SpatialCrossAttention(BaseModule):
         key = key.permute(2, 0, 1, 3).reshape(bs * self.num_cams, l, self.embed_dims)
         value = value.permute(2, 0, 1, 3).reshape(bs * self.num_cams, l, self.embed_dims)
 
+        # 如果各个相机的相机参数不变的话，这里的ref_pts就是固定的
         queries = self.deformable_attention(query=queries_rebatch.view(bs*self.num_cams, max_len, self.embed_dims), 
                                             key=key, 
                                             value=value,
                                             reference_points=reference_points_rebatch.view(bs*self.num_cams, max_len, D, 2), 
                                             spatial_shapes=spatial_shapes,
                                             level_start_index=level_start_index).view(bs, self.num_cams, max_len, self.embed_dims)
+        
+        # slots可以理解为bev_feature的初始化
+        # 下面这一步遍历相机，就是把nev_feature补充完整，相机fov可能有交集，直接相加
         for j in range(bs):
             for i, index_query_per_img in enumerate(indexes):
                 slots[j, index_query_per_img] += queries[j, i, :len(index_query_per_img)]
 
+        # 最终按ref_pts的数量，进行平均
         count = bev_mask.sum(-1) > 0
         count = count.permute(1, 2, 0).sum(-1)
         count = torch.clamp(count, min=1.0)
@@ -382,8 +391,7 @@ class MSDeformableAttention3D(BaseModule):
 
         #  sampling_locations.shape: bs, num_query, num_heads, num_levels, num_all_points, 2
         #  attention_weights.shape: bs, num_query, num_heads, num_levels, num_all_points
-        #
-
+        
         if torch.cuda.is_available() and value.is_cuda:
             if value.dtype == torch.float16:
                 MultiScaleDeformableAttnFunction = MultiScaleDeformableAttnFunction_fp32

@@ -202,37 +202,41 @@ class TemporalSelfAttention(BaseModule):
 
         value = value.reshape(bs*self.num_bev_queue,
                               num_value, self.num_heads, -1)
-
-        sampling_offsets = self.sampling_offsets(query)
-        sampling_offsets = sampling_offsets.view(
-            bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, self.num_points, 2)
-        attention_weights = self.attention_weights(query).view(
-            bs, num_query,  self.num_heads, self.num_bev_queue, self.num_levels * self.num_points)
-        attention_weights = attention_weights.softmax(-1)
-
+        
+        # deform-atten中的samp-offset，由query经过Linear-Layer学习得来
+        sampling_offsets = self.sampling_offsets(query)    
+        sampling_offsets = sampling_offsets.view(bs, num_query, self.num_heads,  
+                                                 self.num_bev_queue, self.num_levels, 
+                                                 self.num_points, 2)
+        # deform-atten中的atten-weights，由query经过另一个Linear-Layer学习得来
+        attention_weights = self.attention_weights(query).view(bs, num_query,  
+                                                               self.num_heads, 
+                                                               self.num_bev_queue, 
+                                                               self.num_levels * self.num_points)
+        # 然后softmax(此部分结合Deformer-DETR论文的图看比较清楚)
+        attention_weights = attention_weights.softmax(-1)  
+        
         attention_weights = attention_weights.view(bs, num_query,
                                                    self.num_heads,
                                                    self.num_bev_queue,
                                                    self.num_levels,
                                                    self.num_points)
-
         attention_weights = attention_weights.permute(0, 3, 1, 2, 4, 5)\
             .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points).contiguous()
         sampling_offsets = sampling_offsets.permute(0, 3, 1, 2, 4, 5, 6)\
             .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points, 2)
 
         if reference_points.shape[-1] == 2:
-            offset_normalizer = torch.stack(
-                [spatial_shapes[..., 1], spatial_shapes[..., 0]], -1)
+            offset_normalizer = torch.stack([spatial_shapes[..., 1], spatial_shapes[..., 0]], -1)
             sampling_locations = reference_points[:, :, None, :, None, :] \
-                + sampling_offsets \
-                / offset_normalizer[None, None, None, :, None, :]
+                                + sampling_offsets \
+                                / offset_normalizer[None, None, None, :, None, :]
 
         elif reference_points.shape[-1] == 4:
             sampling_locations = reference_points[:, :, None, :, None, :2] \
-                + sampling_offsets / self.num_points \
-                * reference_points[:, :, None, :, None, 2:] \
-                * 0.5
+                                + sampling_offsets / self.num_points \
+                                * reference_points[:, :, None, :, None, 2:] \
+                                * 0.5
         else:
             raise ValueError(
                 f'Last dim of reference_points must be'

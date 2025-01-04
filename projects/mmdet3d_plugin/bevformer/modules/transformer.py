@@ -22,7 +22,7 @@ from .decoder import CustomMSDeformableAttention
 from projects.mmdet3d_plugin.models.utils.bricks import run_time
 from mmcv.runner import force_fp32, auto_fp16
 from mmdet3d.models import builder
-
+import shutil
 @TRANSFORMER.register_module()
 class PerceptionTransformer(BaseModule):
     """Implements the Detr3D transformer.
@@ -277,7 +277,7 @@ class PerceptionTransformer(BaseModule):
         img_bev_feat_orig = img_bev_feature.clone().detach()
         
         bs = mlvl_feats[0].size(0)
-        
+
         # img_bev_feature shape: (bs, bev_h*bev_w, embed_dims)即(1, 50x50, 256)
         # pts_feats shape: (1, 384, 128, 128)
 
@@ -324,6 +324,8 @@ class PerceptionTransformer(BaseModule):
         # print("  allocated:{:.2f}GB".format(a))
         # print("  reserved:{:.2f}GB".format(b))
 
+        # source = kwargs['img_metas'][0]['pts_filename']
+        # shutil.copyfile(source, 'dev_data/encoder/lidar.pcd.bin')
         inter_states, inter_references = self.decoder(
             query=query,
             key=None,

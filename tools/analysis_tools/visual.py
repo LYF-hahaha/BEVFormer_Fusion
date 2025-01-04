@@ -483,8 +483,6 @@ def render_sample_data(
 
 
 
-
-
 if __name__ == '__main__':
     nusc = NuScenes(version='v1.0-trainval', dataroot='data/nus_extend', verbose=True)
     bevformer_results = mmcv.load('test/bevformer_small_fusion/173_result/results_nusc__e6d6_epo8.json')

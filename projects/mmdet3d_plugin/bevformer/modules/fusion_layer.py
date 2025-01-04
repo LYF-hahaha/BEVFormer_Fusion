@@ -22,8 +22,8 @@ class ConvFuser(nn.Sequential):
     def forward(self, inputs: List[torch.Tensor]) -> torch.Tensor:    # 类型提示，告知期待的输入和输出类型
         feat_1, feat_2 = inputs
         feat_2 = feat_2[0]
-        feat_comb = torch.cat([feat_1, feat_2], dim=1)   # dim瞎写的,好像蒙对了... 
-        return super().forward(feat_comb)                # dim=1好像就是channel维度
+        feat_comb = torch.cat([feat_1, feat_2], dim=1)   # dim瞎写的,好像蒙对了...   更正: 在通道维度cat，feat_1.shape=[1,256,128,128]  fefat_2.shape=[1,384,128,128]，所以是dim=1
+        return super().forward(feat_comb)                # dim=1好像就是channel维度 （自信点，把好像俩字去了）
 
 #TODO 2: replace the 'None' values in the following code with correct expressions.
 # self.att module consists of AdaptiveAvgPool2d, 1x1convolution and sigmoid function
@@ -31,8 +31,8 @@ class SE_Block(nn.Module):
     def __init__(self, c):
         super().__init__()
         self.att = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1,1)),  
-            nn.Conv2d(256, 256, 
+            nn.AdaptiveAvgPool2d((1,1)),  # 指定输出尺寸为1×1 (squeeze操作，求和为shape=[1,1])
+            nn.Conv2d(256, 256,           # channel wise fusion
                       kernel_size=(1,1)),
             nn.Sigmoid()
         )
@@ -40,7 +40,7 @@ class SE_Block(nn.Module):
 #TODO 3: complete the forward process.
 # weights should be distributed for each channel to get final output.
     def forward(self, x):   # x.shape=[1,256,128,128]
-        out = self.att(x)
-        out = out*x
+        out = self.att(x)   # (squeeze + excitation，求和为shape=[1,1])
+        out = out*x    # scale
         return out
         # raise NotImplementedError

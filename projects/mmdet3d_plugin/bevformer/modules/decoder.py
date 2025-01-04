@@ -106,29 +106,25 @@ class DetectionTransformerDecoder(TransformerLayerSequence):
             # print("      allocated:{:.2f}GB".format(c))
             # print("      reserved:{:.2f}GB".format(d))
             # self_atten, cross_atten在这里面 BaseTransformerLayer
-            output = layer(
-                output,
-                *args,
-                reference_points=reference_points_input,
-                key_padding_mask=key_padding_mask,
-                **kwargs)
+            output = layer(output,
+                           *args,
+                           reference_points=reference_points_input,
+                           key_padding_mask=key_padding_mask,
+                           **kwargs)
             output = output.permute(1, 0, 2)
 
             if reg_branches is not None:
                 tmp = reg_branches[lid](output)  # 一堆Linear&ReLU （lid用来指定与layer对应的FFN层）
-
-                assert reference_points.shape[-1] == 3
+                                                 # 输出维度[900,10]，10用于后面的x,y,z,h,w,l,rot,vx,vy
+                assert reference_points.shape[-1] == 3  
 
                 new_reference_points = torch.zeros_like(reference_points)
                 # 用一轮transformer的query(output)更新reg_points
                 # 这里也就是迭代过程
-                new_reference_points[..., :2] = tmp[
-                    ..., :2] + inverse_sigmoid(reference_points[..., :2])    # 逆sigmoid运算
-                new_reference_points[..., 2:3] = tmp[
-                    ..., 4:5] + inverse_sigmoid(reference_points[..., 2:3])
+                new_reference_points[..., :2] = tmp[..., :2]+inverse_sigmoid(reference_points[..., :2])    # 逆sigmoid运算
+                new_reference_points[..., 2:3] = tmp[..., 4:5]+inverse_sigmoid(reference_points[..., 2:3])
 
                 new_reference_points = new_reference_points.sigmoid()
-
                 reference_points = new_reference_points.detach()
 
             output = output.permute(1, 0, 2)
@@ -137,8 +133,7 @@ class DetectionTransformerDecoder(TransformerLayerSequence):
                 intermediate_reference_points.append(reference_points)
 
         if self.return_intermediate:
-            return torch.stack(intermediate), torch.stack(
-                intermediate_reference_points)
+            return torch.stack(intermediate), torch.stack(intermediate_reference_points)
 
         return output, reference_points
 
