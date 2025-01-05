@@ -1,147 +1,39 @@
+
 # ---------------------------------------------
 # Copyright (c) OpenMMLab. All rights reserved.
 # ---------------------------------------------
-#  Modified by Zhiqi Li
+#  Modified by Yifeng Li
 # ---------------------------------------------
 
 from mmcv.ops.multi_scale_deform_attn import multi_scale_deformable_attn_pytorch
-import mmcv
-import cv2 as cv
-import copy
 import warnings
-from matplotlib import pyplot as plt
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import xavier_init, constant_init
 from mmcv.cnn.bricks.registry import (ATTENTION,
+                                      TRANSFORMER_LAYER,
                                       TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import TransformerLayerSequence
+from mmcv.cnn.bricks.transformer import build_attention
 import math
+from mmcv.runner import force_fp32, auto_fp16
+
 from mmcv.runner.base_module import BaseModule, ModuleList, Sequential
-from mmcv.utils import (ConfigDict, build_from_cfg, deprecated_api_warning,
-                        to_2tuple)
 
 from mmcv.utils import ext_loader
 from .multi_scale_deformable_attn_function import MultiScaleDeformableAttnFunction_fp32, \
     MultiScaleDeformableAttnFunction_fp16
-
+from projects.mmdet3d_plugin.models.utils.bricks import run_time
 ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
 
-
-def inverse_sigmoid(x, eps=1e-5):
-    """Inverse function of sigmoid.
-    Args:
-        x (Tensor): The tensor to do the
-            inverse.
-        eps (float): EPS avoid numerical
-            overflow. Defaults 1e-5.
-    Returns:
-        Tensor: The x has passed the inverse
-            function of sigmoid, has same
-            shape with input.
-    """
-    x = x.clamp(min=0, max=1)
-    x1 = x.clamp(min=eps)
-    x2 = (1 - x).clamp(min=eps)
-    return torch.log(x1 / x2)
-
-
-@TRANSFORMER_LAYER_SEQUENCE.register_module()
-class DetectionTransformerDecoder(TransformerLayerSequence):
-    """Implements the decoder in DETR3D transformer.
-    Args:
-        return_intermediate (bool): Whether to return intermediate outputs.
-        coder_norm_cfg (dict): Config of last normalization layer. Default：
-            `LN`.
-    """
-
-    def __init__(self, *args, return_intermediate=False, **kwargs):
-        super(DetectionTransformerDecoder, self).__init__(*args, **kwargs)
-        self.return_intermediate = return_intermediate
-        self.fp16_enabled = False
-
-    def forward(self,
-                query,
-                *args,
-                reference_points=None,
-                reg_branches=None,
-                key_padding_mask=None,
-                **kwargs):
-        """Forward function for `Detr3DTransformerDecoder`.
-        Args:
-            query (Tensor): Input query with shape
-                `(num_query, bs, embed_dims)`.
-            reference_points (Tensor): The reference
-                points of offset. has shape
-                (bs, num_query, 4) when as_two_stage,
-                otherwise has shape ((bs, num_query, 2).
-            reg_branch: (obj:`nn.ModuleList`): Used for
-                refining the regression results. Only would
-                be passed when with_box_refine is True,
-                otherwise would be passed a `None`.
-        Returns:
-            Tensor: Results with shape [1, num_query, bs, embed_dims] when
-                return_intermediate is `False`, otherwise it has shape
-                [num_layers, num_query, bs, embed_dims].
-        """
-        output = query
-        intermediate = []
-        intermediate_reference_points = []
-        
-        # print('decoder:')
-        # exchange = 1024**3
-        # a = torch.cuda.memory_allocated()/exchange
-        # b = torch.cuda.memory_reserved()/exchange
-        # print("  allocated:{:.2f}GB".format(a))
-        # print("  reserved:{:.2f}GB".format(b))
-        for lid, layer in enumerate(self.layers):
-            reference_points_input = reference_points[..., :2].unsqueeze(2)  # BS NUM_QUERY NUM_LEVEL 2                  
-            # print(f'    round-{lid}')
-            # exchange = 1024**3
-            # c = torch.cuda.memory_allocated()/exchange
-            # d = torch.cuda.memory_reserved()/exchange
-            # print("      allocated:{:.2f}GB".format(c))
-            # print("      reserved:{:.2f}GB".format(d))
-            
-            # self_atten, cross_atten在这里面 BaseTransformerLayer
-            output = layer(output,
-                           *args,
-                           reference_points=reference_points_input,
-                           key_padding_mask=key_padding_mask,
-                           **kwargs)
-            output = output.permute(1, 0, 2)
-
-            if reg_branches is not None:
-                tmp = reg_branches[lid](output)  # 一堆Linear&ReLU （lid用来指定与layer对应的FFN层）
-                                                 # 输出维度[900,10]，10用于后面的x,y,z,h,w,l,rot,vx,vy
-                assert reference_points.shape[-1] == 3  
-
-                new_reference_points = torch.zeros_like(reference_points)
-                # 用一轮transformer的query(output)更新reg_points
-                # 这里也就是迭代过程
-                new_reference_points[..., :2] = tmp[..., :2]+inverse_sigmoid(reference_points[..., :2])    # 逆sigmoid运算
-                new_reference_points[..., 2:3] = tmp[..., 4:5]+inverse_sigmoid(reference_points[..., 2:3])
-
-                new_reference_points = new_reference_points.sigmoid()
-                reference_points = new_reference_points.detach()
-
-            output = output.permute(1, 0, 2)
-            if self.return_intermediate:
-                intermediate.append(output)
-                intermediate_reference_points.append(reference_points)
-
-        if self.return_intermediate:
-            return torch.stack(intermediate), torch.stack(intermediate_reference_points)
-
-        return output, reference_points
-
-
 @ATTENTION.register_module()
-class CustomMSDeformableAttention(BaseModule):
-    """An attention module used in Deformable-Detr.
+class FusionSemiCrossAttention(BaseModule):
+    """An attention module used in fusion.
+       1. SCA输出的embed作为query
+       2.将SCA输出的embed与pts_feat经SENet融合得到key,value
+
+    An attention module used in BEVFormer based on Deformable-Detr.
 
     `Deformable DETR: Deformable Transformers for End-to-End Object Detection.
     <https://arxiv.org/pdf/2010.04159.pdf>`_.
@@ -160,11 +52,13 @@ class CustomMSDeformableAttention(BaseModule):
             Default: 0.1.
         batch_first (bool): Key, Query and Value are shape of
             (batch, n, embed_dim)
-            or (n, batch, embed_dim). Default to False.
+            or (n, batch, embed_dim). Default to True.
         norm_cfg (dict): Config dict for normalization layer.
             Default: None.
         init_cfg (obj:`mmcv.ConfigDict`): The Config for initialization.
             Default: None.
+        num_bev_queue (int): In this version, we only use the currenct fusion_BEV.
+         the length of BEV queue is 1.
     """
 
     def __init__(self,
@@ -172,11 +66,13 @@ class CustomMSDeformableAttention(BaseModule):
                  num_heads=8,
                  num_levels=4,
                  num_points=4,
+                 num_bev_queue=1,
                  im2col_step=64,
                  dropout=0.1,
-                 batch_first=False,
+                 batch_first=True,
                  norm_cfg=None,
                  init_cfg=None):
+
         super().__init__(init_cfg)
         if embed_dims % num_heads != 0:
             raise ValueError(f'embed_dims must be divisible by num_heads, '
@@ -208,10 +104,11 @@ class CustomMSDeformableAttention(BaseModule):
         self.num_levels = num_levels
         self.num_heads = num_heads
         self.num_points = num_points
+        self.num_bev_queue = num_bev_queue
         self.sampling_offsets = nn.Linear(
-            embed_dims, num_heads * num_levels * num_points * 2)
-        self.attention_weights = nn.Linear(embed_dims,
-                                           num_heads * num_levels * num_points)
+            embed_dims*self.num_bev_queue, num_bev_queue*num_heads * num_levels * num_points * 2)
+        self.attention_weights = nn.Linear(embed_dims*self.num_bev_queue,
+                                           num_bev_queue*num_heads * num_levels * num_points)
         self.value_proj = nn.Linear(embed_dims, embed_dims)
         self.output_proj = nn.Linear(embed_dims, embed_dims)
         self.init_weights()
@@ -226,7 +123,8 @@ class CustomMSDeformableAttention(BaseModule):
         grid_init = (grid_init /
                      grid_init.abs().max(-1, keepdim=True)[0]).view(
             self.num_heads, 1, 1,
-            2).repeat(1, self.num_levels, self.num_points, 1)
+            2).repeat(1, self.num_levels*self.num_bev_queue, self.num_points, 1)
+
         for i in range(self.num_points):
             grid_init[:, :, i, :] *= i + 1
 
@@ -236,8 +134,6 @@ class CustomMSDeformableAttention(BaseModule):
         xavier_init(self.output_proj, distribution='uniform', bias=0.)
         self._is_init = True
 
-    @deprecated_api_warning({'residual': 'identity'},
-                            cls_name='MultiScaleDeformableAttention')
     def forward(self,
                 query,
                 key=None,
@@ -249,6 +145,7 @@ class CustomMSDeformableAttention(BaseModule):
                 spatial_shapes=None,
                 level_start_index=None,
                 flag='decoder',
+
                 **kwargs):
         """Forward Function of MultiScaleDeformAttention.
 
@@ -287,7 +184,10 @@ class CustomMSDeformableAttention(BaseModule):
         """
 
         if value is None:
-            value = query
+            assert self.batch_first
+            bs, len_bev, c = query.shape
+            value = torch.stack([query, query], 1).reshape(bs*2, len_bev, c)
+            # value = torch.cat([query, query], 0)
 
         if identity is None:
             identity = query
@@ -297,37 +197,54 @@ class CustomMSDeformableAttention(BaseModule):
             # change to (bs, num_query ,embed_dims)
             query = query.permute(1, 0, 2)
             value = value.permute(1, 0, 2)
-
-        bs, num_query, _ = query.shape
-        bs, num_value, _ = value.shape
+        bs,  num_query, embed_dims = query.shape
+        _, num_value, _ = value.shape
         assert (spatial_shapes[:, 0] * spatial_shapes[:, 1]).sum() == num_value
+        assert self.num_bev_queue == 1
 
-        value = self.value_proj(value)
+        # query = torch.cat([value[:bs], query], -1)  # [1,22500,512]
+        value = self.value_proj(value)              # [1,22500,256]
+
         if key_padding_mask is not None:
             value = value.masked_fill(key_padding_mask[..., None], 0.0)
-        value = value.view(bs, num_value, self.num_heads, -1)
-
-        sampling_offsets = self.sampling_offsets(query).view(
-            bs, num_query, self.num_heads, self.num_levels, self.num_points, 2)
-        attention_weights = self.attention_weights(query).view(
-            bs, num_query, self.num_heads, self.num_levels * self.num_points)
-        attention_weights = attention_weights.softmax(-1)
-
+        # 变多头(通过分channel实现?)
+        value = value.reshape(bs*self.num_bev_queue,
+                              num_value, self.num_heads, -1)  # [2,22500,8,16]
+        
+        # deform-atten中的samp-offset，由query经过Linear-Layer学习得来
+        sampling_offsets = self.sampling_offsets(query)    
+        sampling_offsets = sampling_offsets.view(bs, num_query, self.num_heads,  
+                                                 self.num_bev_queue, self.num_levels, 
+                                                 self.num_points, 2)
+        # deform-atten中的atten-weights，由query经过另一个Linear-Layer学习得来
+        attention_weights = self.attention_weights(query).view(bs, num_query,  
+                                                               self.num_heads, 
+                                                               self.num_bev_queue, 
+                                                               self.num_levels * self.num_points)
+        # 然后softmax(此部分结合Deformer-DETR论文的图看比较清楚)
+        attention_weights = attention_weights.softmax(-1)  
+        
         attention_weights = attention_weights.view(bs, num_query,
                                                    self.num_heads,
+                                                   self.num_bev_queue,
                                                    self.num_levels,
                                                    self.num_points)
+        attention_weights = attention_weights.permute(0, 3, 1, 2, 4, 5)\
+            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points).contiguous()
+        sampling_offsets = sampling_offsets.permute(0, 3, 1, 2, 4, 5, 6)\
+            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points, 2)
+
         if reference_points.shape[-1] == 2:
-            offset_normalizer = torch.stack(
-                [spatial_shapes[..., 1], spatial_shapes[..., 0]], -1)
+            offset_normalizer = torch.stack([spatial_shapes[..., 1], spatial_shapes[..., 0]], -1)
             sampling_locations = reference_points[:, :, None, :, None, :] \
-                + sampling_offsets \
-                / offset_normalizer[None, None, None, :, None, :]
+                                + sampling_offsets \
+                                / offset_normalizer[None, None, None, :, None, :]
+
         elif reference_points.shape[-1] == 4:
             sampling_locations = reference_points[:, :, None, :, None, :2] \
-                + sampling_offsets / self.num_points \
-                * reference_points[:, :, None, :, None, 2:] \
-                * 0.5
+                                + sampling_offsets / self.num_points \
+                                * reference_points[:, :, None, :, None, 2:] \
+                                * 0.5
         else:
             raise ValueError(
                 f'Last dim of reference_points must be'
@@ -343,13 +260,25 @@ class CustomMSDeformableAttention(BaseModule):
                 value, spatial_shapes, level_start_index, sampling_locations,
                 attention_weights, self.im2col_step)
         else:
+
             output = multi_scale_deformable_attn_pytorch(
                 value, spatial_shapes, sampling_locations, attention_weights)
+
+        # output shape (bs*num_bev_queue, num_query, embed_dims)
+        # (bs*num_bev_queue, num_query, embed_dims)-> (num_query, embed_dims, bs*num_bev_queue)
+        output = output.permute(1, 2, 0) # [2,22500,128]? channel少了一半？ embed_dims应该为256
+
+        # fuse history value and current value
+        # (num_query, embed_dims, bs*num_bev_queue)-> (num_query, embed_dims, bs, num_bev_queue)
+        output = output.view(num_query, embed_dims, bs, self.num_bev_queue)
+        output = output.mean(-1)
+
+        # (num_query, embed_dims, bs)-> (bs, num_query, embed_dims)
+        output = output.permute(2, 0, 1)
 
         output = self.output_proj(output)
 
         if not self.batch_first:
-            # (num_query, bs ,embed_dims)
             output = output.permute(1, 0, 2)
 
         return self.dropout(output) + identity

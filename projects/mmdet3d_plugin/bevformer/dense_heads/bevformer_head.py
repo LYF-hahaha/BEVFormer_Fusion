@@ -149,6 +149,7 @@ class BEVFormerHead(DETRHead):
             # obtain_prev_bev会调用到这里，img_queue=2，所以会走两次这里，用两组img获得prev_bev
             return self.transformer.get_bev_features(   
                 mlvl_feats,
+                pts_feats,
                 bev_queries,
                 self.bev_h,
                 self.bev_w,
@@ -176,7 +177,8 @@ class BEVFormerHead(DETRHead):
         )
             
         # 这里的img_bev_feature是插值成128×128的 bev_embed是fusion了img&pts的 
-        img_bev_feature, bev_embed, hs, init_reference, inter_references = outputs
+        # img_bev_feature, bev_embed, 
+        fusion_bev_feature, hs, init_reference, inter_references = outputs
         hs = hs.permute(0, 2, 1, 3)
         outputs_classes = []
         outputs_coords = []
@@ -217,9 +219,10 @@ class BEVFormerHead(DETRHead):
         outputs_classes = torch.stack(outputs_classes)
         outputs_coords = torch.stack(outputs_coords)
 
+            # 
+            # 'bev_embed': bev_embed,
         outs = {
-            'img_bev_feature': img_bev_feature,
-            'bev_embed': bev_embed,
+            'fusion_bev_feature': fusion_bev_feature,
             'all_cls_scores': outputs_classes,
             'all_bbox_preds': outputs_coords,
             'enc_cls_scores': None,

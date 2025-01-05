@@ -20,6 +20,9 @@ from .custom_base_transformer_layer import MyCustomBaseTransformerLayer
 from . import guide_pts_gen as gpg
 import os
 import pickle
+from mmdet3d.models import builder
+from torch.nn import functional as F
+
 
 ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
@@ -241,6 +244,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
                 level_start_index=None,
                 valid_ratios=None,
                 prev_bev=None,
+                pts_feats,
                 shift=0.,
                 **kwargs):
         """Forward function for `TransformerDecoder`.
@@ -290,7 +294,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
         shift_ref_2d = ref_2d.clone()
         shift_ref_2d += shift[:, None, None, :]  # 通过can_bus算出来的帧间bev_grid偏移量
         
-        # 4. 将转换为特征空间后的guide_2d与ref_2d分别融合，然后输出2d_hybrid 
+        # 4. 将转换为特征空间后的guide_2d与ref_2d分别融合，然后输出2d_hybird 
 
         num_2d_curt = guide_2d_curt.shape[0]
         guide_2d_curt = torch.from_numpy(guide_2d_curt)
@@ -347,6 +351,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
                 reference_points_cam=reference_points_cam,
                 bev_mask=bev_mask,
                 prev_bev=prev_bev,
+                pts_feats = pts_feats,
                 **kwargs)
 
             bev_query = output
@@ -389,6 +394,7 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
                  act_cfg=dict(type='ReLU', inplace=True),
                  norm_cfg=dict(type='LN'),
                  ffn_num_fcs=2,
+                 pts_fusion_layer=None,
                  **kwargs):
         super(BEVFormerLayer, self).__init__(
             attn_cfgs=attn_cfgs,
@@ -400,9 +406,12 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
             ffn_num_fcs=ffn_num_fcs,
             **kwargs)
         self.fp16_enabled = False
-        assert len(operation_order) == 6
+        assert len(operation_order) == 9
         assert set(operation_order) == set(
-            ['self_attn', 'norm', 'cross_attn', 'ffn'])
+            ['self_attn', 'norm', 'cross_attn', 'norm',
+              'senet_fusion','semi_attn', 'norm', 'ffn', 'norm'])
+        if pts_fusion_layer:
+            self.pts_fusion_layer = builder.build_fusion_layer(pts_fusion_layer)
 
     def forward(self,
                 query,
@@ -423,6 +432,7 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
                 spatial_shapes=None,
                 level_start_index=None,
                 prev_bev=None,
+                pts_feats = None,
                 **kwargs):
         """Forward function for `TransformerDecoderLayer`.
 
@@ -477,7 +487,7 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
             # temporal self attention
             if layer == 'self_attn':
                 # print(f"layer: {layer}")
-                query = self.attentions[attn_index](
+                query = self.attentions[attn_index](  # 0:TSA  1:SCA  所以2可以是semi_fusion_atten
                     query,
                     prev_bev,
                     prev_bev,
@@ -518,6 +528,49 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
                     **kwargs)
                 attn_index += 1
                 identity = query
+                
+            elif layer == 'senet_fusion':     
+                bs = 1 # mlvl_feats[0].size(0)
+                # img_bev_feature shape: (bs, bev_h*bev_w, embed_dims)即(1, 150x150, 256)
+                # pts_feats shape: (1, 384, 128, 128)
+                features = []
+                # 点云BEV空间特征的尺寸为BEV_H_align, BEV_W_align（128x128）
+                # BEV_H_align, BEV_W_align = pts_feats[0].shape[-2:]
+                
+                # 1. img_bev_feature由(bs, bev_h*bev_w, embed_dims)变换维度到 img_bev_feature_align：(bs, self.embed_dims, bev_h, bev_w)
+                query_pre_fusion = query.clone().detach()
+                query_pre_fusion = query_pre_fusion.reshape(bs, bev_h, bev_w, self.embed_dims).permute(0,3,1,2)
+                
+                # 2. 将query特征通过interpolate插值函数插值到128x128大小，与点云BEV对齐，mode选择bilinear双线性插值法，设置对齐corners  scale_factor=(2.56,2.56)
+                # query = F.interpolate(query, (BEV_H_align, BEV_W_align), mode='bilinear', align_corners=True)
+                
+                # 2. 将pts_feats特征通过interpolate插值函数插值到150x150大小，与query对齐，mode选择bilinear双线性插值法，设置对齐corners  scale_factor=(2.56,2.56)
+                pts_feats[0] = F.interpolate(pts_feats[0], (bev_h, bev_w), mode='bilinear', align_corners=True)
+                # 3. 在features列表中添加上图像BEV特征和点云BEV特征
+                features.append(query_pre_fusion)
+                features.append(pts_feats)
+        
+                # 4. 将features列表输入给融合层self.pts_fusion_layer做融合加强, [1, 384+256, 150, 150]-->[1, 256, 150, 150]
+                fusion_bev = self.pts_fusion_layer(features)
+                fusion_bev = fusion_bev.permute(0,2,3,1).reshape(bs, -1, self.embed_dims)
+                
+            elif layer == 'semi_attn':
+                # print(f"layer: {layer}")
+                query = self.attentions[attn_index](
+                    query,
+                    fusion_bev,
+                    fusion_bev,
+                    identity if self.pre_norm else None,
+                    query_pos=bev_pos,
+                    key_pos=bev_pos,
+                    attn_mask=attn_masks[attn_index],
+                    key_padding_mask=query_key_padding_mask,
+                    reference_points=ref_2d[1].unsqueeze(0),  # ref_2d = stack(prev,curt) 现在只用取curt的即可(但是要加一维dim=0)
+                    spatial_shapes=torch.tensor([[bev_h, bev_w]], device=query.device),
+                    level_start_index=torch.tensor([0], device=query.device),
+                    **kwargs)
+                attn_index += 1
+                identity = query
 
             elif layer == 'ffn':
                 # print(f"layer: {layer}")
@@ -531,7 +584,6 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
 
 
 from mmcv.cnn.bricks.transformer import build_feedforward_network, build_attention
-
 
 @TRANSFORMER_LAYER.register_module()
 class MM_BEVFormerLayer(MyCustomBaseTransformerLayer):

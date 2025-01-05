@@ -14,6 +14,8 @@ import shutil
 import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 from projects.mmdet3d_plugin.bevformer.modules import guide_pts_gen as gpg
+from mmcv.utils import Registry
+from mmcv import Config
 
 def pkl_read():
     train_path = 'data/nus_extend/nuscenes_infos_temporal_train.pkl'
@@ -861,10 +863,52 @@ def ref_3d_ana():
     vis.run()
   
   
+def regst_test():
+    # 实例化一个注册器用来管理模型
+    MODELS = Registry('myModels')
 
-def nus_cont():
-    nusc = NuScenes(version='v1.0-trainval', dataroot='data/nus_extend', verbose=True)
-    nusc.list_categories()
+    print("\n1")
+    # 方式1: 在类的创建过程中, 使用函数装饰器进行注册(推荐)
+    @MODELS.register_module()
+    class ResNet(object):
+        def __init__(self, depth):
+            self.depth = depth
+            print('Initialize ResNet{}'.format(depth))
+    print("2")
+    print(MODELS)
+    """ 打印结果为:
+    Registry(name=myModels, items={'ResNet': <class '__main__.ResNet'>, 'FPN': <class '__main__.FPN'>})
+    """
+    print("3")
+    # 方式2: 完成类的创建后, 再显式调用register_module进行注册(不推荐)   
+    class FPN(object):
+        def __init__(self, in_channel):
+            self.in_channel= in_channel
+            print('Initialize FPN{}'.format(in_channel))
+    MODELS.register_module(name='FPN', module=FPN)
+    print("4")
+    print(MODELS)
+    
+    
+    # 配置参数, 一般cfg从配置文件中获取
+    backbone_cfg = dict(type='ResNet', depth=101)
+    neck_cfg = dict(type='FPN', in_channel=256)
+    print("5")
+    # 实例化模型(将配置参数传给模型的构造函数), 得到实例化对象
+    
+    cfg = Config.fromfile('tools/regst_cfg.py')
+    
+    my_neck = MODELS.build(cfg)
+    print("6")
+    my_backbone = MODELS.build(cfg)
+    print("7")
+    print(my_backbone, my_neck)
+    print("8\n")
+    """ 打印结果为:
+    Initialize ResNet101
+    Initialize FPN256
+    <__main__.ResNet object at 0x000001E68E99E198> <__main__.FPN object at 0x000001E695044B38>
+    """
 
 
 def main():
@@ -881,7 +925,7 @@ def main():
     # multi_modality_anay()
     # ref_3d_ana()
     # gpg.pkl_read()
-    nus_cont()
+    regst_test()
 
 
 if __name__ == '__main__':

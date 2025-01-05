@@ -2,6 +2,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 # ---------------------------------------------
 #  Modified by Zhiqi Li
+#  Adding by Yifeng Li
 # ---------------------------------------------
 
 import copy
@@ -103,17 +104,19 @@ class MyCustomBaseTransformerLayer(BaseModule):
         self.batch_first = batch_first
 
         assert set(operation_order) & set(
-            ['self_attn', 'norm', 'ffn', 'cross_attn']) == \
+            ['self_attn', 'cross_attn', 'semi_attn', 'norm', 'ffn', 'senet_fusion']) == \
             set(operation_order), f'The operation_order of' \
             f' {self.__class__.__name__} should ' \
             f'contains all four operation type ' \
-            f"{['self_attn', 'norm', 'ffn', 'cross_attn']}"
+            f"{['self_attn', 'cross_attn', 'semi_attn', 'norm', 'ffn', 'senet_fusion']}"
 
-        num_attn = operation_order.count('self_attn') + operation_order.count(
-            'cross_attn')
+        num_attn = operation_order.count('self_attn') + \
+                   operation_order.count('cross_attn') + \
+                   operation_order.count('semi_attn')  
         if isinstance(attn_cfgs, dict):
             attn_cfgs = [copy.deepcopy(attn_cfgs) for _ in range(num_attn)]
         else:
+            # opreation order中要求的atten操作的数量得与attn_cfgs中定义的atten操作数量一致
             assert num_attn == len(attn_cfgs), f'The length ' \
                 f'of attn_cfg {num_attn} is ' \
                 f'not consistent with the number of attention' \
@@ -127,7 +130,7 @@ class MyCustomBaseTransformerLayer(BaseModule):
 
         index = 0
         for operation_name in operation_order:
-            if operation_name in ['self_attn', 'cross_attn']:
+            if operation_name in ['self_attn', 'cross_attn','semi_attn']:
                 if 'batch_first' in attn_cfgs[index]:
                     assert self.batch_first == attn_cfgs[index]['batch_first']
                 else:

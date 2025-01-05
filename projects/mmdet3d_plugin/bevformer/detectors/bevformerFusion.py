@@ -244,7 +244,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
             bs, len_queue, num_cams, C, H, W = imgs_queue.shape     # 不止拿一张照片,多张提升数据可靠性,在tiny里是2
             imgs_queue = imgs_queue.reshape(bs*len_queue, num_cams, C, H, W)
             # 这里已经调用过一次ext_feat了
-            img_feats_list = self.extract_feat(img=imgs_queue, points=points, len_queue=len_queue)[0]  # 这后面一个[0]把pts_feat给去了
+            img_feats_list, pts_feats = self.extract_feat(img=imgs_queue, points=points, len_queue=len_queue)  # 这后面一个[0]把pts_feat给去了
             for i in range(len_queue):
                 img_metas = [each[i] for each in img_metas_list]   # 为保证prev_bev生成的时候是有prev_prev_bev的，所以取3帧
                 if not img_metas[0]['prev_bev_exists']:
@@ -252,7 +252,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
                 # img_feats = self.extract_feat(img=img, img_metas=img_metas)
                 # img_feats_list[0].shape=[1,2,6,256,23,40], dim=1的2就是为了这里来两次，以获得有prev_bev输入的prev_bev
                 img_feats = [each_scale[:, i] for each_scale in img_feats_list]
-                prev_bev = self.pts_bbox_head(img_feats, points, 
+                prev_bev = self.pts_bbox_head(img_feats, pts_feats, 
                                               img_metas, prev_bev, 
                                               only_bev=True)  # 第一帧prev_bev=None, 第一帧encoder(没用decoder)输出的bev_embed就是第二帧的prev_bev
             self.train()
@@ -352,7 +352,7 @@ class BEVFormerFusion(MVXTwoStageDetector):
 
         # 注意，这里把上一帧的img_bev_feats赋值给new_prev_bev了
         # 而返回的原先new_prev_bev (即带pts的fusion_embed丢弃了)
-        new_prev_bev, _, bbox_results = self.simple_test(img_metas[0], img[0], points[0],
+        new_prev_bev, bbox_results = self.simple_test(img_metas[0], img[0], points[0],
                                                          prev_bev=self.prev_frame_info['prev_bev'], **kwargs)
         # During inference, we save the BEV features and ego motion of each timestamp.
         self.prev_frame_info['prev_pos'] = tmp_pos
@@ -370,13 +370,13 @@ class BEVFormerFusion(MVXTwoStageDetector):
         img_feats, pts_feats = self.extract_feat(img, points, img_metas)
 
         bbox_list = [dict() for i in range(len(img_metas))]
-        img_bev_feature, new_prev_bev, bbox_pts = self.simple_test_pts(img_feats, pts_feats, 
-                                                                       img_metas, prev_bev, rescale=rescale)
+        # img_bev_feature, new_prev_bev, 
+        fusion_bev_feature, bbox_pts = self.simple_test_pts(img_feats, pts_feats, img_metas, prev_bev, rescale=rescale)
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
         
-        return img_bev_feature, new_prev_bev, bbox_list
-
+        return  fusion_bev_feature, bbox_list
+        # img_bev_feature, new_prev_bev,
 
     def simple_test_pts(self, img_feats, pts_feats, img_metas, prev_bev=None, rescale=False):
         """Test function"""
@@ -390,7 +390,8 @@ class BEVFormerFusion(MVXTwoStageDetector):
             bbox3d2result(bboxes, scores, labels)
             for bboxes, scores, labels in bbox_list
         ]
-        return outs['img_bev_feature'], outs['bev_embed'], bbox_results
+        return outs['fusion_bev_feature'], bbox_results
+        # , outs['bev_embed'],
 
     
         # # 可视化BEV融合特征
