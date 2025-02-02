@@ -90,7 +90,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
             ref_x = ref_x.reshape(-1)[None] / W
             ref_2d = torch.stack((ref_x, ref_y), -1)
             ref_2d = ref_2d.repeat(bs, 1, 1).unsqueeze(2)
-            return ref_2d
+            return ref_2d  # 这里返回的也是ratio
 
     # This function must use fp32!!!
     @force_fp32(apply_to=('reference_points', 'img_metas'))
@@ -229,7 +229,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
         guide_3d, guide_2d_curt = gpg.guide_gen_curt(dnst_grid_curt)
         guide_2d_prev = gpg.guide_gen_2d(dnst_grid_prev)
         
-        return guide_2d_prev, guide_2d_curt, guide_3d
+        return guide_2d_prev, guide_2d_curt, guide_3d  # 3d是几何值 2d是ratio
 
     @auto_fp16()
     def forward(self,

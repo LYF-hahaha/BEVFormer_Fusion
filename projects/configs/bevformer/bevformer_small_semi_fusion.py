@@ -49,7 +49,7 @@ model = dict(
     video_test_mode=True,
     img_backbone=dict(
         type='ResNet',
-        depth=50,  # 101
+        depth=101,  # 101
         num_stages=4,
         out_indices=(3,),
         frozen_stages=1,
@@ -85,7 +85,7 @@ model = dict(
             embed_dims=_dim_,
             encoder=dict(
                 type='BEVFormerEncoder',
-                num_layers=3,
+                num_layers=6,
                 pc_range=point_cloud_range,
                 num_points_in_pillar=4,
                 return_intermediate=False,
@@ -123,7 +123,7 @@ model = dict(
             
             decoder=dict(
                 type='DetectionTransformerDecoder',
-                num_layers=3,
+                num_layers=6,
                 return_intermediate=True,
                 transformerlayers=dict(
                     type='DetrTransformerDecoderLayer',
@@ -217,9 +217,9 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'CustomNuScenesDataset'
-data_root = './data/nuscenes/'
+# data_root = './data/nuscenes/'
 # data_root = './data/nus_extend/'   # 这里面就是train.pkl、test.pkl、val.pkl、maps、samples、sweeps、v1.0-trainval、v1.0-test
-# data_root = './data_nas/nuscenes_us/'
+data_root = './data_nas/nuscenes_us/'
 file_client_args = dict(backend='disk')
 
 
@@ -338,7 +338,7 @@ lr_config = dict(
     warmup_ratio=1.0 / 3,
     min_lr_ratio=1e-3)
 total_epochs = 8
-evaluation = dict(interval=2, pipeline=test_pipeline)
+evaluation = dict(interval=1, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 

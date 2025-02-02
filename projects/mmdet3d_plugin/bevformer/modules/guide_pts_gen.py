@@ -76,13 +76,13 @@ def guide_gen_curt(dnst_grid):
                 z_max = dnst_grid[i][j][1]
                 z_min = dnst_grid[i][j][2]
                 z_list = np.array([(z_max-z_min)/pts_num*k+z_min for k in range(int(pts_num))])
-                x_value = (j+0.5)/2-50
+                x_value = (j+0.5)/2-50  # 网格坐标转换成米制单位
                 y_value = (i+0.5)/2-50
                 x = np.array([x_value for k in range(int(pts_num))])
                 y = np.array([y_value for k in range(int(pts_num))])
                 pts = np.stack([x,y,z_list],axis=-1)
                 guide_3d_pts = np.append(guide_3d_pts, values=pts, axis=0)
-                guide_2d_pts = np.append(guide_2d_pts, values=[[(j+0.5)/200,1-(i+0.5)/200]], axis=0)
+                guide_2d_pts = np.append(guide_2d_pts, values=[[(j+0.5)/200,1-(i+0.5)/200]], axis=0) # 用ratio记录位置
     return guide_3d_pts[1:,:], guide_2d_pts[1:,:]
 
 # 这里处理2d引导点
